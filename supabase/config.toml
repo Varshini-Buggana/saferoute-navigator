@@ -1,0 +1,10 @@
+project_id = "kvdkxwfelqbtdalcaqcd"
+
+[functions.safety]
+verify_jwt = false
+
+[functions.heatmap]
+verify_jwt = false
+
+[functions.route-safety]
+verify_jwt = false
