@@ -12,6 +12,11 @@ export default defineConfig(({ mode }) => ({
       overlay: false,
     },
   },
+  // react-leaflet/@react-leaflet/core can break when pre-bundled by Vite in some environments.
+  // Excluding them forces Vite to use the actual ESM sources from node_modules.
+  optimizeDeps: {
+    exclude: ["react-leaflet", "@react-leaflet/core"],
+  },
   plugins: [react(), mode === "development" && componentTagger()].filter(Boolean),
   resolve: {
     alias: {

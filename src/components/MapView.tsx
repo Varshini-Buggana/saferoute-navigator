@@ -1,153 +1,149 @@
-import { useEffect } from "react";
-import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from "react-leaflet";
+import { useEffect, useMemo, useRef } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { RoutePoint } from "@/data/mockSafetyData";
-
-// Fix for default marker icons in React-Leaflet - must be done before component renders
-if (typeof window !== "undefined") {
-  delete (L.Icon.Default.prototype as any)._getIconUrl;
-  L.Icon.Default.mergeOptions({
-    iconRetinaUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png",
-    iconUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png",
-    shadowUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png",
-  });
-}
-
-// Custom colored markers
-const createColoredIcon = (color: string) => {
-  return L.divIcon({
-    className: "custom-marker",
-    html: `
-      <div style="
-        width: 24px;
-        height: 24px;
-        background: ${color};
-        border: 3px solid white;
-        border-radius: 50%;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-      "></div>
-    `,
-    iconSize: [24, 24],
-    iconAnchor: [12, 12],
-  });
-};
-
-const safeIcon = createColoredIcon("#16a34a"); // green
-const cautionIcon = createColoredIcon("#eab308"); // yellow
-const dangerIcon = createColoredIcon("#dc2626"); // red
-
-const getMarkerIcon = (status: "safe" | "caution" | "danger") => {
-  switch (status) {
-    case "safe":
-      return safeIcon;
-    case "caution":
-      return cautionIcon;
-    case "danger":
-      return dangerIcon;
-    default:
-      return safeIcon;
-  }
-};
-
-// Component to handle map bounds
-const MapBounds = ({ routePoints }: { routePoints: RoutePoint[] }) => {
-  const map = useMap();
-
-  useEffect(() => {
-    if (routePoints.length > 0) {
-      const bounds = L.latLngBounds(routePoints.map((p) => [p.lat, p.lng]));
-      map.fitBounds(bounds, { padding: [50, 50] });
-    }
-  }, [routePoints, map]);
-
-  return null;
-};
 
 interface MapViewProps {
   routePoints: RoutePoint[];
   onMarkerClick?: (point: RoutePoint) => void;
 }
 
-// Inner map content component to avoid context issues
-const MapContent = ({ routePoints, onMarkerClick }: MapViewProps) => {
-  const routeLine: [number, number][] = routePoints.map((p) => [p.lat, p.lng]);
-
-  return (
-    <>
-      <TileLayer
-        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-      />
-
-      {/* Route Line */}
-      {routeLine.length > 1 && (
-        <Polyline
-          positions={routeLine}
-          pathOptions={{
-            color: "#0284c7",
-            weight: 4,
-            opacity: 0.8,
-            dashArray: "10, 10",
-          }}
-        />
-      )}
-
-      {/* Safety Markers */}
-      {routePoints.map((point, index) => (
-        <Marker
-          key={`marker-${index}-${point.name}`}
-          position={[point.lat, point.lng]}
-          icon={getMarkerIcon(point.status)}
-          eventHandlers={{
-            click: () => onMarkerClick?.(point),
-          }}
-        >
-          <Popup>
-            <div className="p-1">
-              <div className="font-semibold text-sm">{point.name}</div>
-              <div className="flex items-center gap-1 mt-1">
-                <span
-                  className="w-2 h-2 rounded-full"
-                  style={{
-                    backgroundColor:
-                      point.status === "safe"
-                        ? "#16a34a"
-                        : point.status === "caution"
-                        ? "#eab308"
-                        : "#dc2626",
-                  }}
-                />
-                <span className="text-xs capitalize">{point.status}</span>
-              </div>
-            </div>
-          </Popup>
-        </Marker>
-      ))}
-
-      {/* Adjust bounds when route changes */}
-      <MapBounds routePoints={routePoints} />
-    </>
-  );
-};
-
 const MapView = ({ routePoints, onMarkerClick }: MapViewProps) => {
   // India center coordinates
   const indiaCenter: [number, number] = [20.5937, 78.9629];
   const defaultZoom = 5;
 
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const mapRef = useRef<L.Map | null>(null);
+  const layerGroupRef = useRef<L.LayerGroup | null>(null);
+
+  const palette = useMemo(() => {
+    if (typeof window === "undefined") return null;
+    const root = document.documentElement;
+    const read = (name: string, fallbackHsl: string) => {
+      const v = getComputedStyle(root).getPropertyValue(name).trim();
+      return v ? `hsl(${v})` : fallbackHsl;
+    };
+    // Fallbacks are HSL (to match the design-token requirement)
+    return {
+      safe: read("--safe", "hsl(142 72% 29%)"),
+      caution: read("--caution", "hsl(45 93% 47%)"),
+      danger: read("--danger", "hsl(0 84% 50%)"),
+      primary: read("--primary", "hsl(201 96% 32%)"),
+    };
+  }, []);
+
+  const icons = useMemo(() => {
+    if (!palette) return null;
+    const make = (color: string) =>
+      L.divIcon({
+        className: "custom-marker",
+        html: `
+          <div style="
+            width: 24px;
+            height: 24px;
+            background: ${color};
+            border: 3px solid white;
+            border-radius: 50%;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+          "></div>
+        `,
+        iconSize: [24, 24],
+        iconAnchor: [12, 12],
+      });
+    return {
+      safe: make(palette.safe),
+      caution: make(palette.caution),
+      danger: make(palette.danger),
+    };
+  }, [palette]);
+
+  const markerColor = (status: RoutePoint["status"]) => {
+    if (!palette) return "hsl(201 96% 32%)";
+    if (status === "safe") return palette.safe;
+    if (status === "caution") return palette.caution;
+    return palette.danger;
+  };
+
+  // 1) Create Leaflet map once
+  useEffect(() => {
+    if (!containerRef.current || mapRef.current) return;
+
+    const map = L.map(containerRef.current, {
+      zoomControl: true,
+      attributionControl: true,
+    }).setView(indiaCenter, defaultZoom);
+
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution:
+        '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    }).addTo(map);
+
+    const group = L.layerGroup().addTo(map);
+    mapRef.current = map;
+    layerGroupRef.current = group;
+
+    return () => {
+      map.remove();
+      mapRef.current = null;
+      layerGroupRef.current = null;
+    };
+  }, [defaultZoom, indiaCenter]);
+
+  // 2) Render markers + route line whenever routePoints change
+  useEffect(() => {
+    const map = mapRef.current;
+    const group = layerGroupRef.current;
+    if (!map || !group || !icons || !palette) return;
+
+    group.clearLayers();
+
+    // Route line
+    if (routePoints.length > 1) {
+      const latlngs = routePoints.map((p) => [p.lat, p.lng] as [number, number]);
+      L.polyline(latlngs, {
+        color: palette.primary,
+        weight: 4,
+        opacity: 0.8,
+        dashArray: "10, 10",
+      }).addTo(group);
+    }
+
+    // Markers
+    routePoints.forEach((point) => {
+      const icon =
+        point.status === "safe"
+          ? icons.safe
+          : point.status === "caution"
+          ? icons.caution
+          : icons.danger;
+
+      const popupHtml = `
+        <div style="padding: 4px 6px;">
+          <div style="font-weight: 600; font-size: 12px;">${point.name}</div>
+          <div style="display:flex; align-items:center; gap:6px; margin-top:4px; font-size: 11px; text-transform: capitalize;">
+            <span style="width:8px; height:8px; border-radius:999px; background:${markerColor(point.status)};"></span>
+            <span>${point.status}</span>
+          </div>
+        </div>
+      `;
+
+      const marker = L.marker([point.lat, point.lng], { icon }).addTo(group);
+      marker.bindPopup(popupHtml);
+      marker.on("click", () => onMarkerClick?.(point));
+    });
+
+    // Fit bounds
+    if (routePoints.length > 0) {
+      const bounds = L.latLngBounds(routePoints.map((p) => [p.lat, p.lng] as [number, number]));
+      map.fitBounds(bounds, { padding: [50, 50] });
+    }
+  }, [icons, onMarkerClick, palette, routePoints]);
+
   return (
     <div className="relative w-full h-full rounded-lg overflow-hidden shadow-soft border border-border">
-      <MapContainer
-        center={indiaCenter}
-        zoom={defaultZoom}
-        className="w-full h-full"
-        scrollWheelZoom={true}
-      >
-        <MapContent routePoints={routePoints} onMarkerClick={onMarkerClick} />
-      </MapContainer>
+      <div ref={containerRef} className="w-full h-full" />
     </div>
   );
 };
-
 export default MapView;
