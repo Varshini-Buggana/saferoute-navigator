@@ -97,18 +97,27 @@ serve(async (req) => {
   }
 
   try {
-    const { fromLocation, toLocation } = await req.json();
+    const { fromLocation, toLocation, fromCoords: providedFromCoords, toCoords: providedToCoords } = await req.json();
     
     console.log(`[Route Safety API] Analyzing route: ${fromLocation} → ${toLocation}`);
+    console.log(`[Route Safety API] Provided coords - From: ${providedFromCoords ? 'yes' : 'no'}, To: ${providedToCoords ? 'yes' : 'no'}`);
     
-    // Get coordinates
-    const fromCoords = getCoordinates(fromLocation);
-    const toCoords = getCoordinates(toLocation);
+    // Use provided coordinates if available, otherwise try to lookup
+    let fromCoords = providedFromCoords ? { ...providedFromCoords, safetyLevel: "caution" } : getCoordinates(fromLocation);
+    let toCoords = providedToCoords ? { ...providedToCoords, safetyLevel: "caution" } : getCoordinates(toLocation);
+    
+    // If coordinates are provided but no safetyLevel, default to caution for unknown areas
+    if (providedFromCoords && !fromCoords?.safetyLevel) {
+      fromCoords = { lat: providedFromCoords.lat, lng: providedFromCoords.lng, safetyLevel: "caution" };
+    }
+    if (providedToCoords && !toCoords?.safetyLevel) {
+      toCoords = { lat: providedToCoords.lat, lng: providedToCoords.lng, safetyLevel: "caution" };
+    }
     
     if (!fromCoords) {
       return new Response(
         JSON.stringify({ 
-          error: `Unknown origin location: ${fromLocation}. Try cities like Delhi, Mumbai, Bangalore, etc.`,
+          error: `Could not locate: ${fromLocation}. Please select a location from the suggestions.`,
           success: false 
         }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -118,7 +127,7 @@ serve(async (req) => {
     if (!toCoords) {
       return new Response(
         JSON.stringify({ 
-          error: `Unknown destination: ${toLocation}. Try cities like Delhi, Mumbai, Bangalore, etc.`,
+          error: `Could not locate: ${toLocation}. Please select a location from the suggestions.`,
           success: false 
         }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }

@@ -1,78 +1,97 @@
 import { useState } from "react";
-import { MapPin, Navigation, Route } from "lucide-react";
+import { Route, Globe } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import LocationAutocomplete from "@/components/LocationAutocomplete";
+
+interface GeocodeResult {
+  lat: number;
+  lng: number;
+  formatted_address: string;
+  place_id: string;
+}
 
 interface SearchPanelProps {
-  onSearch: (from: string, to: string) => void;
+  onSearch: (from: string, to: string, fromCoords?: GeocodeResult, toCoords?: GeocodeResult) => void;
   isLoading?: boolean;
 }
 
 const SearchPanel = ({ onSearch, isLoading }: SearchPanelProps) => {
   const [fromLocation, setFromLocation] = useState("");
   const [toLocation, setToLocation] = useState("");
+  const [fromCoords, setFromCoords] = useState<GeocodeResult | null>(null);
+  const [toCoords, setToCoords] = useState<GeocodeResult | null>(null);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (fromLocation.trim() && toLocation.trim()) {
-      onSearch(fromLocation, toLocation);
+      onSearch(
+        fromLocation, 
+        toLocation, 
+        fromCoords || undefined, 
+        toCoords || undefined
+      );
     }
   };
 
   return (
-    <div className="bg-card rounded-lg p-6 shadow-soft border border-border">
-      <div className="flex items-center gap-2 mb-4">
-        <Route className="w-5 h-5 text-primary" />
-        <h2 className="text-lg font-semibold text-card-foreground">Plan Your Route</h2>
-      </div>
+    <div className="bg-panel rounded-lg p-6 shadow-soft border border-border city-silhouette relative overflow-hidden">
+      {/* Subtle nav pattern */}
+      <div className="absolute inset-0 nav-pattern opacity-30 pointer-events-none" />
       
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <div className="space-y-3">
-          <div className="relative">
-            <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-safe" />
-            <Input
-              type="text"
-              placeholder="From location"
-              value={fromLocation}
-              onChange={(e) => setFromLocation(e.target.value)}
-              className="pl-11 h-12 bg-background border-border focus:border-primary focus:ring-primary/20"
-            />
+      <div className="relative z-10">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <Route className="w-5 h-5 text-primary" />
+            <h2 className="text-lg font-semibold text-card-foreground">Plan Your Route</h2>
           </div>
-          
-          <div className="flex justify-center">
-            <div className="w-px h-4 bg-border" />
-          </div>
-          
-          <div className="relative">
-            <Navigation className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-primary" />
-            <Input
-              type="text"
-              placeholder="To location"
-              value={toLocation}
-              onChange={(e) => setToLocation(e.target.value)}
-              className="pl-11 h-12 bg-background border-border focus:border-primary focus:ring-primary/20"
-            />
+          <div className="flex items-center gap-1 text-xs text-muted-foreground">
+            <Globe className="w-3 h-3" />
+            <span>Global</span>
           </div>
         </div>
+        
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="space-y-3">
+            <LocationAutocomplete
+              value={fromLocation}
+              onChange={setFromLocation}
+              onSelect={setFromCoords}
+              placeholder="From location (anywhere in the world)"
+              icon="from"
+            />
+            
+            <div className="flex justify-center">
+              <div className="w-px h-4 bg-border" />
+            </div>
+            
+            <LocationAutocomplete
+              value={toLocation}
+              onChange={setToLocation}
+              onSelect={setToCoords}
+              placeholder="To location"
+              icon="to"
+            />
+          </div>
 
-        <Button 
-          type="submit" 
-          className="w-full h-12 text-base font-medium"
-          disabled={isLoading || !fromLocation.trim() || !toLocation.trim()}
-        >
-          {isLoading ? (
-            <span className="flex items-center gap-2">
-              <span className="w-4 h-4 border-2 border-primary-foreground/30 border-t-primary-foreground rounded-full animate-spin" />
-              Finding Route...
-            </span>
-          ) : (
-            <span className="flex items-center gap-2">
-              <Route className="w-5 h-5" />
-              Get Route
-            </span>
-          )}
-        </Button>
-      </form>
+          <Button 
+            type="submit" 
+            className="w-full h-12 text-base font-medium shadow-glow"
+            disabled={isLoading || !fromLocation.trim() || !toLocation.trim()}
+          >
+            {isLoading ? (
+              <span className="flex items-center gap-2">
+                <span className="w-4 h-4 border-2 border-primary-foreground/30 border-t-primary-foreground rounded-full animate-spin" />
+                Finding Route...
+              </span>
+            ) : (
+              <span className="flex items-center gap-2">
+                <Route className="w-5 h-5" />
+                Get Route
+              </span>
+            )}
+          </Button>
+        </form>
+      </div>
     </div>
   );
 };
