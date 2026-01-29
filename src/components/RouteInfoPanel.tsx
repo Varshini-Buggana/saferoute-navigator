@@ -37,9 +37,12 @@ const RouteInfoPanel = ({ data }: RouteInfoPanelProps) => {
   const config = riskConfig[data.overallRiskLevel] || riskConfig["Moderate Risk"];
 
   return (
-    <div className="bg-card rounded-lg shadow-soft border border-border overflow-hidden animate-slide-in-right">
+    <div className="bg-panel rounded-lg shadow-soft border border-border overflow-hidden animate-slide-in-right relative">
+      {/* Subtle texture */}
+      <div className="absolute inset-0 map-texture pointer-events-none opacity-50" />
+      
       {/* Route Header */}
-      <div className={cn("p-4 border-b", config.bgColor, config.borderColor)}>
+      <div className={cn("p-4 border-b relative z-10", config.bgColor, config.borderColor)}>
         <div className="flex items-center gap-2 mb-2">
           <Route className="w-5 h-5 text-primary" />
           <h3 className="font-semibold text-card-foreground">Route Analysis</h3>
@@ -47,14 +50,14 @@ const RouteInfoPanel = ({ data }: RouteInfoPanelProps) => {
         <div className="text-sm text-muted-foreground">
           {data.route.from.name} → {data.route.to.name}
         </div>
-        <div className={cn("mt-2 inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium", config.bgColor, config.textColor)}>
+        <div className={cn("mt-2 inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium shadow-sm", config.bgColor, config.textColor)}>
           <Shield className="w-4 h-4" />
           {data.overallRiskLevel}
         </div>
       </div>
 
       {/* Route Score */}
-      <div className="p-4 border-b border-border">
+      <div className="p-4 border-b border-border relative z-10">
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-2">
             <TrendingUp className="w-4 h-4 text-primary" />
@@ -76,7 +79,7 @@ const RouteInfoPanel = ({ data }: RouteInfoPanelProps) => {
       </div>
 
       {/* Travel Info */}
-      <div className="p-4 border-b border-border space-y-3">
+      <div className="p-4 border-b border-border space-y-3 relative z-10">
         <div className="flex items-center gap-3 text-sm">
           <Clock className="w-4 h-4 text-muted-foreground" />
           <span className="text-card-foreground">{data.estimatedTravelTime}</span>
@@ -95,7 +98,7 @@ const RouteInfoPanel = ({ data }: RouteInfoPanelProps) => {
 
       {/* Unsafe Segments */}
       {data.unsafeSegments && data.unsafeSegments.length > 0 && (
-        <div className="p-4 border-b border-border">
+        <div className="p-4 border-b border-border relative z-10">
           <div className="flex items-center gap-2 mb-3">
             <AlertTriangle className="w-4 h-4 text-caution" />
             <h4 className="text-sm font-medium text-card-foreground">Caution Areas</h4>
@@ -121,7 +124,7 @@ const RouteInfoPanel = ({ data }: RouteInfoPanelProps) => {
 
       {/* Safety Tips */}
       {data.safetyTips && data.safetyTips.length > 0 && (
-        <div className="p-4 border-b border-border">
+        <div className="p-4 border-b border-border relative z-10">
           <div className="flex items-center gap-2 mb-3">
             <Lightbulb className="w-4 h-4 text-primary" />
             <h4 className="text-sm font-medium text-card-foreground">Safety Tips</h4>
@@ -139,14 +142,14 @@ const RouteInfoPanel = ({ data }: RouteInfoPanelProps) => {
 
       {/* Emergency Contacts */}
       {data.emergencyContacts && (
-        <div className="p-4 bg-muted/50">
+        <div className="p-4 bg-muted/50 relative z-10">
           <div className="flex items-center gap-2 mb-2">
             <Phone className="w-4 h-4 text-danger" />
             <h4 className="text-xs font-medium text-card-foreground">Emergency</h4>
           </div>
           <div className="flex flex-wrap gap-2 text-xs">
-            <span className="bg-card px-2 py-1 rounded">Police: {data.emergencyContacts.police}</span>
-            <span className="bg-card px-2 py-1 rounded">Ambulance: {data.emergencyContacts.ambulance}</span>
+            <span className="bg-card px-2 py-1 rounded shadow-sm">Police: {data.emergencyContacts.police}</span>
+            <span className="bg-card px-2 py-1 rounded shadow-sm">Ambulance: {data.emergencyContacts.ambulance}</span>
           </div>
         </div>
       )}

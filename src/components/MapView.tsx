@@ -9,9 +9,9 @@ interface MapViewProps {
 }
 
 const MapView = ({ routePoints, onMarkerClick }: MapViewProps) => {
-  // India center coordinates
-  const indiaCenter: [number, number] = [20.5937, 78.9629];
-  const defaultZoom = 5;
+  // World center coordinates (default view)
+  const worldCenter: [number, number] = [20, 0];
+  const defaultZoom = 2; // World view zoom level
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -72,7 +72,9 @@ const MapView = ({ routePoints, onMarkerClick }: MapViewProps) => {
     const map = L.map(containerRef.current, {
       zoomControl: true,
       attributionControl: true,
-    }).setView(indiaCenter, defaultZoom);
+      minZoom: 2,
+      maxZoom: 18,
+    }).setView(worldCenter, defaultZoom);
 
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       attribution:
@@ -88,7 +90,7 @@ const MapView = ({ routePoints, onMarkerClick }: MapViewProps) => {
       mapRef.current = null;
       layerGroupRef.current = null;
     };
-  }, [defaultZoom, indiaCenter]);
+  }, [defaultZoom, worldCenter]);
 
   // 2) Render markers + route line whenever routePoints change
   useEffect(() => {

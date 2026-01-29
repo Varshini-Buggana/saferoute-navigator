@@ -52,12 +52,16 @@
     /* Gradients */
     --gradient-header: linear-gradient(135deg, hsl(210 100% 45%) 0%, hsl(210 100% 35%) 100%);
     --gradient-card: linear-gradient(145deg, hsl(0 0% 100%) 0%, hsl(210 40% 98%) 100%);
+    --gradient-travel-bg: linear-gradient(135deg, hsl(210 40% 98%) 0%, hsl(195 53% 95%) 50%, hsl(142 76% 97%) 100%);
+    --gradient-panel: linear-gradient(180deg, hsl(0 0% 100% / 0.95) 0%, hsl(210 40% 99% / 0.9) 100%);
+    --gradient-hero: radial-gradient(ellipse at top, hsl(210 100% 97%) 0%, hsl(210 40% 98%) 50%, transparent 100%);
     
     /* Shadows */
     --shadow-sm: 0 1px 2px 0 hsl(210 20% 20% / 0.05);
     --shadow-md: 0 4px 6px -1px hsl(210 20% 20% / 0.1), 0 2px 4px -2px hsl(210 20% 20% / 0.1);
     --shadow-lg: 0 10px 15px -3px hsl(210 20% 20% / 0.1), 0 4px 6px -4px hsl(210 20% 20% / 0.1);
     --shadow-xl: 0 20px 25px -5px hsl(210 20% 20% / 0.1), 0 8px 10px -6px hsl(210 20% 20% / 0.1);
+    --shadow-glow: 0 0 20px hsl(210 100% 45% / 0.15);
 
     --sidebar-background: 0 0% 98%;
     --sidebar-foreground: 240 5.3% 26.1%;
@@ -148,6 +152,88 @@
 
   .shadow-elevated {
     box-shadow: var(--shadow-lg);
+  }
+
+  .shadow-glow {
+    box-shadow: var(--shadow-glow);
+  }
+
+  /* Travel-themed backgrounds */
+  .bg-travel {
+    background: var(--gradient-travel-bg);
+  }
+
+  .bg-panel {
+    background: var(--gradient-panel);
+    backdrop-filter: blur(8px);
+  }
+
+  .bg-hero {
+    background: var(--gradient-hero);
+  }
+
+  /* Subtle map texture overlay */
+  .map-texture {
+    position: relative;
+  }
+
+  .map-texture::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: 
+      radial-gradient(circle at 20% 30%, hsl(210 100% 45% / 0.03) 0%, transparent 50%),
+      radial-gradient(circle at 80% 70%, hsl(142 76% 36% / 0.03) 0%, transparent 50%),
+      linear-gradient(45deg, transparent 45%, hsl(210 20% 90% / 0.1) 50%, transparent 55%),
+      linear-gradient(-45deg, transparent 45%, hsl(210 20% 90% / 0.1) 50%, transparent 55%);
+    background-size: 100% 100%, 100% 100%, 40px 40px, 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+    border-radius: inherit;
+  }
+
+  /* City silhouette effect for panels */
+  .city-silhouette {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .city-silhouette::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 60px;
+    background: 
+      linear-gradient(to top, hsl(210 20% 95% / 0.5) 0%, transparent 100%),
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 40'%3E%3Cpath fill='%23e2e8f0' opacity='0.3' d='M0 40 L0 35 L10 35 L10 25 L15 25 L15 20 L20 20 L20 35 L30 35 L30 15 L35 15 L35 10 L40 10 L40 35 L50 35 L50 30 L55 30 L55 25 L60 25 L60 35 L70 35 L70 20 L75 20 L75 15 L80 15 L80 35 L90 35 L90 28 L95 28 L95 35 L105 35 L105 18 L110 18 L110 12 L115 12 L115 35 L125 35 L125 32 L130 32 L130 35 L140 35 L140 22 L145 22 L145 16 L150 16 L150 35 L160 35 L160 30 L165 30 L165 35 L175 35 L175 25 L180 25 L180 20 L185 20 L185 35 L195 35 L195 28 L200 28 L200 40 Z'/%3E%3C/svg%3E");
+    background-repeat: repeat-x;
+    background-position: bottom;
+    background-size: 200px 40px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* Navigation dots pattern */
+  .nav-pattern {
+    background-image: radial-gradient(circle, hsl(210 100% 45% / 0.08) 1px, transparent 1px);
+    background-size: 20px 20px;
+  }
+
+  /* Animated pulse for safety indicators */
+  @keyframes safety-pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.7; transform: scale(1.05); }
+  }
+
+  .animate-safety-pulse {
+    animation: safety-pulse 2s ease-in-out infinite;
+  }
+
+  /* Route line animation */
+  @keyframes route-dash {
+    to { stroke-dashoffset: -20; }
   }
 }
 

@@ -144,12 +144,14 @@ export async function getHeatmapData(bounds?: {
  */
 export async function analyzeRouteSafety(
   fromLocation: string,
-  toLocation: string
+  toLocation: string,
+  fromCoords?: { lat: number; lng: number },
+  toCoords?: { lat: number; lng: number }
 ): Promise<RouteSafetyResponse> {
   console.log(`[SafetyAPI] Analyzing route: ${fromLocation} → ${toLocation}`);
   
   const { data, error } = await supabase.functions.invoke("route-safety", {
-    body: { fromLocation, toLocation },
+    body: { fromLocation, toLocation, fromCoords, toCoords },
   });
 
   if (error) {

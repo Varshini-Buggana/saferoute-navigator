@@ -48,25 +48,28 @@ const SafetyInfoPanel = ({ data, isVisible }: SafetyInfoPanelProps) => {
   const StatusIcon = config.icon;
 
   return (
-    <div className="bg-card rounded-lg shadow-soft border border-border overflow-hidden animate-slide-in-right">
+    <div className="bg-panel rounded-lg shadow-soft border border-border overflow-hidden animate-slide-in-right relative">
+      {/* Subtle map texture background */}
+      <div className="absolute inset-0 map-texture pointer-events-none opacity-50" />
+      
       {/* Status Header */}
-      <div className={cn("p-4 border-b", config.bgColor, config.borderColor)}>
+      <div className={cn("p-4 border-b relative z-10", config.bgColor, config.borderColor)}>
         <div className="flex items-center gap-3">
-          <div className={cn("p-2 rounded-lg", config.badgeBg)}>
+          <div className={cn("p-2 rounded-lg shadow-md", config.badgeBg)}>
             <StatusIcon className="w-5 h-5 text-primary-foreground" />
           </div>
           <div>
             <h3 className={cn("font-semibold", config.textColor)}>{config.label}</h3>
             <div className="flex items-center gap-1 text-sm text-muted-foreground">
               <MapPin className="w-3 h-3" />
-              <span>{data.location}</span>
+              <span className="truncate max-w-[180px]">{data.location}</span>
             </div>
           </div>
         </div>
       </div>
 
       {/* Safety Score */}
-      <div className="p-4 border-b border-border">
+      <div className="p-4 border-b border-border relative z-10">
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-2">
             <TrendingUp className="w-4 h-4 text-primary" />
@@ -85,7 +88,7 @@ const SafetyInfoPanel = ({ data, isVisible }: SafetyInfoPanelProps) => {
       </div>
 
       {/* Reasons */}
-      <div className="p-4">
+      <div className="p-4 relative z-10">
         <div className="flex items-center gap-2 mb-3">
           <Shield className="w-4 h-4 text-primary" />
           <h4 className="text-sm font-medium text-card-foreground">Safety Factors</h4>
@@ -102,7 +105,7 @@ const SafetyInfoPanel = ({ data, isVisible }: SafetyInfoPanelProps) => {
       </div>
 
       {/* Footer */}
-      <div className="px-4 py-3 bg-muted/50 border-t border-border">
+      <div className="px-4 py-3 bg-muted/50 border-t border-border relative z-10">
         <div className="flex items-center gap-1 text-xs text-muted-foreground">
           <Clock className="w-3 h-3" />
           <span>Last updated: {data.lastUpdated}</span>

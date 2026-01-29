@@ -8,3 +8,6 @@ verify_jwt = false
 
 [functions.route-safety]
 verify_jwt = false
+
+[functions.geocode]
+verify_jwt = false

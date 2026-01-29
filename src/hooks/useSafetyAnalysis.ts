@@ -79,12 +79,16 @@ export function useRouteSafetyAnalysis() {
   return useMutation({
     mutationFn: async ({ 
       fromLocation, 
-      toLocation 
+      toLocation,
+      fromCoords,
+      toCoords
     }: { 
       fromLocation: string; 
       toLocation: string;
+      fromCoords?: { lat: number; lng: number };
+      toCoords?: { lat: number; lng: number };
     }) => {
-      return analyzeRouteSafety(fromLocation, toLocation);
+      return analyzeRouteSafety(fromLocation, toLocation, fromCoords, toCoords);
     },
     onSuccess: (data) => {
       // Cache the result by route
