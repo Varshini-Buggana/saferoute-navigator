@@ -1,34 +1,53 @@
-import { Info } from "lucide-react";
+import { Shield, AlertTriangle, CheckCircle } from "lucide-react";
 
 const MapLegend = () => {
-  const legendItems = [
-    { color: "bg-safe", label: "Safe", description: "Low risk area" },
-    { color: "bg-caution", label: "Caution", description: "Moderate risk" },
-    { color: "bg-danger", label: "Danger", description: "High risk area" },
+  const items = [
+    { 
+      label: "Safe", 
+      colorClass: "bg-safe", 
+      icon: CheckCircle,
+      textClass: "text-safe",
+      description: "Low risk area"
+    },
+    { 
+      label: "Caution", 
+      colorClass: "bg-caution", 
+      icon: AlertTriangle,
+      textClass: "text-caution",
+      description: "Stay alert"
+    },
+    { 
+      label: "High Risk", 
+      colorClass: "bg-danger", 
+      icon: Shield,
+      textClass: "text-danger",
+      description: "Extra care needed"
+    },
   ];
 
   return (
-    <div className="bg-panel rounded-lg p-4 shadow-soft border border-border relative overflow-hidden">
-      {/* Subtle pattern */}
-      <div className="absolute inset-0 nav-pattern opacity-20 pointer-events-none" />
-      
-      <div className="relative z-10">
-        <div className="flex items-center gap-2 mb-3">
-          <Info className="w-4 h-4 text-primary" />
-          <h3 className="text-sm font-semibold text-card-foreground">Safety Legend</h3>
-        </div>
-        
-        <div className="space-y-2">
-          {legendItems.map((item) => (
-            <div key={item.label} className="flex items-center gap-3">
-              <div className={`w-4 h-4 rounded-full ${item.color} shadow-sm ring-2 ring-white`} />
+    <div className="bg-card rounded-xl p-4 shadow-soft border border-border">
+      <h3 className="text-sm font-semibold text-card-foreground mb-3 flex items-center gap-2">
+        <Shield className="w-4 h-4 text-primary" />
+        Safety Legend
+      </h3>
+      <div className="space-y-2">
+        {items.map((item) => {
+          const Icon = item.icon;
+          return (
+            <div 
+              key={item.label} 
+              className="flex items-center gap-3 p-2 rounded-lg hover:bg-muted/50 transition-colors"
+            >
+              <div className={`w-3.5 h-3.5 rounded-full ${item.colorClass} shadow-sm`} />
               <div className="flex-1">
-                <span className="text-sm font-medium text-card-foreground">{item.label}</span>
-                <span className="text-xs text-muted-foreground ml-2">{item.description}</span>
+                <span className={`text-sm font-medium ${item.textClass}`}>{item.label}</span>
+                <p className="text-xs text-muted-foreground">{item.description}</p>
               </div>
+              <Icon className={`w-4 h-4 ${item.textClass} opacity-60`} />
             </div>
-          ))}
-        </div>
+          );
+        })}
       </div>
     </div>
   );
