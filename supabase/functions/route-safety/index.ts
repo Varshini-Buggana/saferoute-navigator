@@ -4,7 +4,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
  * Route Safety Analysis Edge Function
  * 
  * Analyzes the safety of a route between two locations using AI.
- * Identifies unsafe segments and provides route-level risk assessment.
+ * Generates AREA-BASED risk points spread around locations (not along route lines).
  */
 
 const corsHeaders = {
@@ -70,28 +70,69 @@ function getRouteHazards(from: string, to: string): typeof routeHazards[string] 
   const fromNorm = from.toLowerCase().trim();
   const toNorm = to.toLowerCase().trim();
   
-  // Try both directions
   const key1 = `${fromNorm}-${toNorm}`;
   const key2 = `${toNorm}-${fromNorm}`;
   
   return routeHazards[key1] || routeHazards[key2] || [];
 }
 
-function generateWaypoints(from: { lat: number; lng: number }, to: { lat: number; lng: number }, count: number = 3): Array<{ lat: number; lng: number; name: string }> {
-  const waypoints = [];
-  for (let i = 1; i <= count; i++) {
-    const fraction = i / (count + 1);
-    waypoints.push({
-      lat: from.lat + (to.lat - from.lat) * fraction,
-      lng: from.lng + (to.lng - from.lng) * fraction,
-      name: `Waypoint ${i}`
+/**
+ * Generate area-based risk points spread around a center location
+ * NOT along a line, but in a realistic geographic cluster
+ */
+function generateAreaRiskPoints(
+  centerLat: number, 
+  centerLng: number, 
+  areaName: string,
+  baseRisk: "safe" | "caution" | "danger",
+  count: number = 4,
+  radiusKm: number = 8
+): Array<{ lat: number; lng: number; name: string; status: "safe" | "caution" | "danger" }> {
+  const points: Array<{ lat: number; lng: number; name: string; status: "safe" | "caution" | "danger" }> = [];
+  
+  // Convert km to degrees (approximate)
+  const latRadius = radiusKm / 111;
+  const lngRadius = radiusKm / (111 * Math.cos(centerLat * Math.PI / 180));
+  
+  const areaTypes = [
+    "Industrial Zone", "Commercial District", "Residential Area", 
+    "Market Area", "Highway Junction", "Transport Hub",
+    "Old Town", "Business Park", "Shopping District"
+  ];
+  
+  for (let i = 0; i < count; i++) {
+    // Random angle and distance - spread in all directions, not linearly
+    const angle = (Math.PI * 2 * i / count) + (Math.random() - 0.5) * 0.5;
+    const distance = 0.4 + Math.random() * 0.6; // 40-100% of radius
+    
+    const lat = centerLat + (Math.sin(angle) * latRadius * distance);
+    const lng = centerLng + (Math.cos(angle) * lngRadius * distance);
+    
+    // Vary risk level from base - some areas safer, some more dangerous
+    const riskVariation = Math.random();
+    let status: "safe" | "caution" | "danger";
+    if (baseRisk === "safe") {
+      status = riskVariation < 0.7 ? "safe" : "caution";
+    } else if (baseRisk === "danger") {
+      status = riskVariation < 0.3 ? "caution" : "danger";
+    } else {
+      status = riskVariation < 0.3 ? "safe" : riskVariation < 0.8 ? "caution" : "danger";
+    }
+    
+    const areaType = areaTypes[Math.floor(Math.random() * areaTypes.length)];
+    
+    points.push({
+      lat: parseFloat(lat.toFixed(6)),
+      lng: parseFloat(lng.toFixed(6)),
+      name: `${areaName} - ${areaType}`,
+      status
     });
   }
-  return waypoints;
+  
+  return points;
 }
 
 serve(async (req) => {
-  // Handle CORS preflight
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
@@ -100,13 +141,11 @@ serve(async (req) => {
     const { fromLocation, toLocation, fromCoords: providedFromCoords, toCoords: providedToCoords } = await req.json();
     
     console.log(`[Route Safety API] Analyzing route: ${fromLocation} → ${toLocation}`);
-    console.log(`[Route Safety API] Provided coords - From: ${providedFromCoords ? 'yes' : 'no'}, To: ${providedToCoords ? 'yes' : 'no'}`);
     
     // Use provided coordinates if available, otherwise try to lookup
     let fromCoords = providedFromCoords ? { ...providedFromCoords, safetyLevel: "caution" } : getCoordinates(fromLocation);
     let toCoords = providedToCoords ? { ...providedToCoords, safetyLevel: "caution" } : getCoordinates(toLocation);
     
-    // If coordinates are provided but no safetyLevel, default to caution for unknown areas
     if (providedFromCoords && !fromCoords?.safetyLevel) {
       fromCoords = { lat: providedFromCoords.lat, lng: providedFromCoords.lng, safetyLevel: "caution" };
     }
@@ -134,9 +173,7 @@ serve(async (req) => {
       );
     }
     
-    // Get route-specific hazards
     const hazards = getRouteHazards(fromLocation, toLocation);
-    const waypoints = generateWaypoints(fromCoords, toCoords);
     
     // Call AI for comprehensive route analysis
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
@@ -217,14 +254,12 @@ Respond ONLY with valid JSON.`;
     
     console.log("[Route Safety API] AI response received");
     
-    // Parse AI response
     let routeAnalysis;
     try {
       const cleanedContent = aiContent.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
       routeAnalysis = JSON.parse(cleanedContent);
     } catch (parseError) {
       console.error("[Route Safety API] Failed to parse AI response:", parseError);
-      // Fallback analysis
       routeAnalysis = {
         overallRiskLevel: hazards.some(h => h.severity === "high") ? "Moderate Risk" : "Low Risk",
         routeSafetyScore: 3.5,
@@ -250,18 +285,35 @@ Respond ONLY with valid JSON.`;
       };
     }
 
-    // Build route points for frontend
+    // Generate AREA-BASED risk points (not along route line)
+    const fromRisk = fromCoords.safetyLevel === "safe" ? "safe" : fromCoords.safetyLevel === "danger" ? "danger" : "caution";
+    const toRisk = toCoords.safetyLevel === "safe" ? "safe" : toCoords.safetyLevel === "danger" ? "danger" : "caution";
+    
+    // Generate risk zones around start location
+    const fromAreaPoints = generateAreaRiskPoints(
+      fromCoords.lat, 
+      fromCoords.lng, 
+      fromLocation,
+      fromRisk as "safe" | "caution" | "danger",
+      3,
+      5
+    );
+    
+    // Generate risk zones around destination
+    const toAreaPoints = generateAreaRiskPoints(
+      toCoords.lat, 
+      toCoords.lng, 
+      toLocation,
+      toRisk as "safe" | "caution" | "danger",
+      3,
+      5
+    );
+    
+    // Build route points - start and end plus area-based risk zones
     const routePoints = [
       { lat: fromCoords.lat, lng: fromCoords.lng, name: fromLocation, status: fromCoords.safetyLevel },
-      ...waypoints.map((wp, index) => {
-        const segment = routeAnalysis.unsafeSegments?.[index];
-        return {
-          lat: wp.lat,
-          lng: wp.lng,
-          name: segment?.name || wp.name,
-          status: segment?.risk === "high" ? "danger" : segment?.risk === "moderate" ? "caution" : "safe"
-        };
-      }),
+      ...fromAreaPoints,
+      ...toAreaPoints,
       { lat: toCoords.lat, lng: toCoords.lng, name: toLocation, status: toCoords.safetyLevel }
     ];
 
