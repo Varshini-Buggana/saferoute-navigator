@@ -4,6 +4,8 @@ import SearchPanel from "@/components/SearchPanel";
 import MapView from "@/components/MapView";
 import MapLegend from "@/components/MapLegend";
 import HeatmapToggle from "@/components/HeatmapToggle";
+import TransportModeSelector, { TransportMode } from "@/components/TransportModeSelector";
+import TravelInfoCard from "@/components/TravelInfoCard";
 import SafetyInfoPanel, { SafetyData } from "@/components/SafetyInfoPanel";
 import RouteInfoPanel from "@/components/RouteInfoPanel";
 import { RoutePoint } from "@/data/mockSafetyData";
@@ -26,6 +28,9 @@ const Index = () => {
   const [hasSearched, setHasSearched] = useState(false);
   const [showHeatmap, setShowHeatmap] = useState(false);
   const [heatmapData, setHeatmapData] = useState<HeatmapPoint[]>([]);
+  const [transportMode, setTransportMode] = useState<TransportMode>("driving");
+  const [travelDistance, setTravelDistance] = useState<string>("");
+  const [travelDuration, setTravelDuration] = useState<string>("");
 
   const routeSafetyMutation = useRouteSafetyAnalysis();
   const heatmapQuery = useHeatmapData();
@@ -44,6 +49,11 @@ const Index = () => {
     }
   };
 
+  const handleRouteCalculated = (distance: string, duration: string) => {
+    setTravelDistance(distance);
+    setTravelDuration(duration);
+  };
+
   const handleSearch = async (
     from: string, 
     to: string, 
@@ -53,6 +63,8 @@ const Index = () => {
     setHasSearched(true);
     setSelectedSafetyData(null);
     setRouteAnalysis(null);
+    setTravelDistance("");
+    setTravelDuration("");
 
     try {
       const result = await routeSafetyMutation.mutateAsync({ 
@@ -128,6 +140,21 @@ const Index = () => {
             {/* Left Sidebar */}
             <div className="lg:col-span-3 space-y-4">
               <SearchPanel onSearch={handleSearch} isLoading={isLoading} />
+              
+              <TransportModeSelector 
+                value={transportMode}
+                onChange={setTransportMode}
+                disabled={isLoading}
+              />
+              
+              {hasSearched && travelDuration && (
+                <TravelInfoCard
+                  distance={travelDistance}
+                  duration={travelDuration}
+                  mode={transportMode}
+                  isLoading={isLoading}
+                />
+              )}
               
               <HeatmapToggle 
                 enabled={showHeatmap} 
@@ -205,6 +232,8 @@ const Index = () => {
                   onMarkerClick={handleMarkerClick}
                   heatmapData={heatmapData}
                   showHeatmap={showHeatmap}
+                  transportMode={transportMode}
+                  onRouteCalculated={handleRouteCalculated}
                 />
               )}
             </div>
@@ -250,27 +279,31 @@ const Index = () => {
                 </div>
               ) : null}
 
-              {/* Quick Tips Card */}
+              {/* Route Features Card */}
               {hasSearched && (
                 <div className="bg-card rounded-xl p-4 shadow-soft border border-border relative overflow-hidden animate-fade-in">
                   <div className="absolute inset-0 bg-gradient-to-br from-safe/5 to-transparent" />
                   <div className="relative z-10">
                     <div className="flex items-center gap-2 mb-3">
                       <Globe className="w-4 h-4 text-primary" />
-                      <h3 className="text-sm font-semibold text-card-foreground">Route Features</h3>
+                      <h3 className="text-sm font-semibold text-card-foreground">Map Features</h3>
                     </div>
                     <ul className="text-xs text-muted-foreground space-y-2">
                       <li className="flex items-start gap-2">
-                        <Route className="w-3 h-3 mt-0.5 text-primary" />
-                        <span>Routes follow actual roads via OSRM</span>
+                        <span className="text-base">🚩</span>
+                        <span>Red flag marks your starting point</span>
+                      </li>
+                      <li className="flex items-start gap-2">
+                        <span className="text-base">🏁</span>
+                        <span>Checkered flag marks destination</span>
                       </li>
                       <li className="flex items-start gap-2">
                         <span className="w-3 h-3 mt-0.5 rounded-full bg-safe flex-shrink-0" />
-                        <span>Green markers indicate safe areas</span>
+                        <span>Green zones are safe areas</span>
                       </li>
                       <li className="flex items-start gap-2">
                         <span className="w-3 h-3 mt-0.5 rounded-full bg-danger flex-shrink-0" />
-                        <span>Red markers need extra caution</span>
+                        <span>Red zones need extra caution</span>
                       </li>
                     </ul>
                   </div>

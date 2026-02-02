@@ -5,6 +5,7 @@ import "leaflet-routing-machine";
 import "leaflet.heat";
 import { RoutePoint } from "@/data/mockSafetyData";
 import { HeatmapPoint } from "@/lib/safetyApi";
+import { TransportMode } from "./TransportModeSelector";
 
 // Extend Leaflet types for routing machine and heatmap
 declare module "leaflet" {
@@ -20,9 +21,26 @@ interface MapViewProps {
   onMarkerClick?: (point: RoutePoint) => void;
   heatmapData?: HeatmapPoint[];
   showHeatmap?: boolean;
+  transportMode?: TransportMode;
+  onRouteCalculated?: (distance: string, duration: string) => void;
 }
 
-const MapView = ({ routePoints, onMarkerClick, heatmapData = [], showHeatmap = false }: MapViewProps) => {
+// OSRM profile mapping
+const osrmProfiles: Record<TransportMode, string> = {
+  driving: "driving",
+  walking: "foot",
+  cycling: "bike",
+  transit: "driving", // OSRM doesn't have transit, fall back to driving
+};
+
+const MapView = ({ 
+  routePoints, 
+  onMarkerClick, 
+  heatmapData = [], 
+  showHeatmap = false,
+  transportMode = "driving",
+  onRouteCalculated
+}: MapViewProps) => {
   const worldCenter: [number, number] = [20, 0];
   const defaultZoom = 2;
 
@@ -45,6 +63,23 @@ const MapView = ({ routePoints, onMarkerClick, heatmapData = [], showHeatmap = f
       danger: read("--danger", "hsl(0 84% 50%)"),
       primary: read("--primary", "hsl(201 96% 32%)"),
     };
+  }, []);
+
+  // Create emoji-based icons for start and end
+  const createEmojiIcon = useCallback((emoji: string, size: number = 32) => {
+    return L.divIcon({
+      className: "emoji-marker",
+      html: `
+        <div style="
+          font-size: ${size}px;
+          line-height: 1;
+          text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+          filter: drop-shadow(0 2px 2px rgba(0,0,0,0.2));
+        ">${emoji}</div>
+      `,
+      iconSize: [size, size],
+      iconAnchor: [size / 2, size],
+    });
   }, []);
 
   const icons = useMemo(() => {
@@ -70,8 +105,6 @@ const MapView = ({ routePoints, onMarkerClick, heatmapData = [], showHeatmap = f
       safe: make(palette.safe),
       caution: make(palette.caution),
       danger: make(palette.danger),
-      start: make(palette.primary, 28),
-      end: make(palette.danger, 28),
     };
   }, [palette]);
 
@@ -117,7 +150,7 @@ const MapView = ({ routePoints, onMarkerClick, heatmapData = [], showHeatmap = f
     };
   }, []);
 
-  // Handle routing when points change
+  // Handle routing when points or transport mode changes
   useEffect(() => {
     const map = mapRef.current;
     const markerGroup = markerGroupRef.current;
@@ -150,7 +183,7 @@ const MapView = ({ routePoints, onMarkerClick, heatmapData = [], showHeatmap = f
       ],
       router: L.Routing.osrmv1({
         serviceUrl: "https://router.project-osrm.org/route/v1",
-        profile: "driving",
+        profile: osrmProfiles[transportMode],
       }),
       lineOptions: {
         styles: [
@@ -168,29 +201,66 @@ const MapView = ({ routePoints, onMarkerClick, heatmapData = [], showHeatmap = f
       createMarker: () => null, // We'll add our own markers
     });
 
+    // Listen for route calculation to get distance and duration
+    routingControl.on("routesfound", (e: any) => {
+      const routes = e.routes;
+      if (routes && routes.length > 0) {
+        const route = routes[0];
+        const distanceKm = (route.summary.totalDistance / 1000).toFixed(1);
+        const durationMins = Math.round(route.summary.totalTime / 60);
+        
+        let durationStr: string;
+        if (durationMins < 60) {
+          durationStr = `${durationMins} min`;
+        } else {
+          const hours = Math.floor(durationMins / 60);
+          const mins = durationMins % 60;
+          durationStr = mins > 0 ? `${hours}h ${mins}min` : `${hours}h`;
+        }
+        
+        onRouteCalculated?.(`${distanceKm} km`, durationStr);
+      }
+    });
+
     routingControl.addTo(map);
     routingControlRef.current = routingControl;
 
-    // Add safety markers for all waypoints
-    routePoints.forEach((point, index) => {
-      let icon;
-      if (index === 0) {
-        icon = icons.start;
-      } else if (index === routePoints.length - 1) {
-        icon = icons.end;
-      } else {
-        icon = point.status === "safe" ? icons.safe : point.status === "caution" ? icons.caution : icons.danger;
-      }
+    // Add emoji markers for start and end
+    const startMarker = L.marker([startPoint.lat, startPoint.lng], { 
+      icon: createEmojiIcon("🚩", 36) 
+    }).addTo(markerGroup);
+    startMarker.bindPopup(`
+      <div style="padding: 8px 12px; min-width: 150px;">
+        <div style="font-weight: 600; font-size: 14px; margin-bottom: 4px;">🚩 ${startPoint.name}</div>
+        <div style="font-size: 12px; color: #666;">Starting Point</div>
+      </div>
+    `);
+    startMarker.on("click", () => onMarkerClick?.(startPoint));
+
+    const endMarker = L.marker([endPoint.lat, endPoint.lng], { 
+      icon: createEmojiIcon("🏁", 36) 
+    }).addTo(markerGroup);
+    endMarker.bindPopup(`
+      <div style="padding: 8px 12px; min-width: 150px;">
+        <div style="font-weight: 600; font-size: 14px; margin-bottom: 4px;">🏁 ${endPoint.name}</div>
+        <div style="font-size: 12px; color: #666;">Destination</div>
+      </div>
+    `);
+    endMarker.on("click", () => onMarkerClick?.(endPoint));
+
+    // Add area-based risk markers (not along route, but nearby areas)
+    // Skip start and end points as they have emoji markers
+    const riskPoints = routePoints.slice(1, -1);
+    riskPoints.forEach((point) => {
+      const icon = point.status === "safe" ? icons.safe : point.status === "caution" ? icons.caution : icons.danger;
 
       const popupHtml = `
         <div style="padding: 8px 12px; min-width: 150px;">
           <div style="font-weight: 600; font-size: 14px; margin-bottom: 4px;">${point.name}</div>
           <div style="display:flex; align-items:center; gap:8px; font-size: 12px; text-transform: capitalize;">
             <span style="width:10px; height:10px; border-radius:999px; background:${markerColor(point.status)};"></span>
-            <span>${point.status}</span>
+            <span>${point.status === "safe" ? "🟢 Safe Zone" : point.status === "caution" ? "🟡 Caution Zone" : "🔴 High Risk Zone"}</span>
           </div>
-          ${index === 0 ? '<div style="font-size: 11px; color: #666; margin-top: 4px;">📍 Start Point</div>' : ''}
-          ${index === routePoints.length - 1 ? '<div style="font-size: 11px; color: #666; margin-top: 4px;">🎯 Destination</div>' : ''}
         </div>
       `;
 
@@ -203,9 +273,9 @@ const MapView = ({ routePoints, onMarkerClick, heatmapData = [], showHeatmap = f
     const bounds = L.latLngBounds(routePoints.map((p) => [p.lat, p.lng] as [number, number]));
     map.fitBounds(bounds, { padding: [60, 60] });
 
-  }, [icons, onMarkerClick, palette, routePoints, markerColor]);
+  }, [icons, onMarkerClick, palette, routePoints, markerColor, transportMode, createEmojiIcon, onRouteCalculated]);
 
-  // Handle heatmap layer
+  // Handle heatmap layer - area-based, independent of routes
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -225,10 +295,11 @@ const MapView = ({ routePoints, onMarkerClick, heatmapData = [], showHeatmap = f
       ]);
 
       const heatLayer = L.heatLayer(heatPoints, {
-        radius: 35,
-        blur: 25,
-        maxZoom: 10,
+        radius: 40,
+        blur: 30,
+        maxZoom: 12,
         max: 1.0,
+        minOpacity: 0.4,
         gradient: {
           0.0: "#16a34a", // Safe - Green
           0.3: "#22c55e",
