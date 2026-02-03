@@ -26,20 +26,34 @@ interface MapViewProps {
 }
 
 // OSRM profile mapping - different service URLs for different profiles
-const getOsrmConfig = (mode: TransportMode): { serviceUrl: string; profile: string } => {
-  // Use different OSRM demo profiles - note: transit uses driving as fallback
+const getOsrmConfig = (mode: TransportMode): { serviceUrl: string; profile: string } | null => {
   switch (mode) {
     case "walking":
       return { serviceUrl: "https://router.project-osrm.org/route/v1", profile: "foot" };
-    case "cycling":
-      return { serviceUrl: "https://router.project-osrm.org/route/v1", profile: "bike" };
-    case "transit":
-      // OSRM doesn't have transit, use driving with speed adjustment
-      return { serviceUrl: "https://router.project-osrm.org/route/v1", profile: "driving" };
     case "driving":
+      return { serviceUrl: "https://router.project-osrm.org/route/v1", profile: "driving" };
+    case "transit":
+    case "train":
+      // Use driving profile as approximation for transit/train
+      return { serviceUrl: "https://router.project-osrm.org/route/v1", profile: "driving" };
+    case "flight":
+      // Flight mode - no routing available
+      return null;
     default:
       return { serviceUrl: "https://router.project-osrm.org/route/v1", profile: "driving" };
   }
+};
+
+// Calculate straight-line distance between two points (for flight mode)
+const calculateStraightLineDistance = (lat1: number, lng1: number, lat2: number, lng2: number): number => {
+  const R = 6371; // Earth's radius in km
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLng / 2) * Math.sin(dLng / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
 };
 
 // Generate points along a route corridor for heatmap
@@ -115,20 +129,37 @@ const MapView = ({
     };
   }, []);
 
-  // Create emoji-based icons for start and end
-  const createEmojiIcon = useCallback((emoji: string, size: number = 32) => {
+  // Create Google Maps-style pin icons for start and end
+  const createPinIcon = useCallback((color: string, label: string = "") => {
     return L.divIcon({
-      className: "emoji-marker",
+      className: "custom-pin-marker",
       html: `
-        <div style="
-          font-size: ${size}px;
-          line-height: 1;
-          text-shadow: 0 2px 4px rgba(0,0,0,0.3);
-          filter: drop-shadow(0 2px 2px rgba(0,0,0,0.2));
-        ">${emoji}</div>
+        <div style="position: relative;">
+          <svg width="32" height="44" viewBox="0 0 32 44" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M16 0C7.163 0 0 7.163 0 16c0 12 16 28 16 28s16-16 16-28c0-8.837-7.163-16-16-16z" fill="${color}"/>
+            <path d="M16 0C7.163 0 0 7.163 0 16c0 12 16 28 16 28s16-16 16-28c0-8.837-7.163-16-16-16z" fill="url(#gradient)" fill-opacity="0.3"/>
+            <circle cx="16" cy="16" r="8" fill="white"/>
+            <defs>
+              <linearGradient id="gradient" x1="16" y1="0" x2="16" y2="44">
+                <stop offset="0%" stop-color="white" stop-opacity="0.4"/>
+                <stop offset="100%" stop-color="black" stop-opacity="0.2"/>
+              </linearGradient>
+            </defs>
+          </svg>
+          ${label ? `<span style="
+            position: absolute;
+            top: 8px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 10px;
+            font-weight: bold;
+            color: ${color};
+          ">${label}</span>` : ""}
+        </div>
       `,
-      iconSize: [size, size],
-      iconAnchor: [size / 2, size],
+      iconSize: [32, 44],
+      iconAnchor: [16, 44],
+      popupAnchor: [0, -44],
     });
   }, []);
 
@@ -242,16 +273,79 @@ const MapView = ({
     const startPoint = routePoints[0];
     const endPoint = routePoints[routePoints.length - 1];
 
+    // Add Google Maps-style pin markers for start and end
+    const startMarker = L.marker([startPoint.lat, startPoint.lng], { 
+      icon: createPinIcon("#4285F4", "A"),  // Google blue for start
+      zIndexOffset: 1000,
+    }).addTo(markerGroup);
+    startMarker.bindPopup(`
+      <div style="padding: 8px 12px; min-width: 150px;">
+        <div style="font-weight: 600; font-size: 14px; margin-bottom: 4px;">${startPoint.name}</div>
+        <div style="font-size: 12px; color: #666;">Starting Point</div>
+        <div style="font-size: 10px; color: #999; margin-top: 4px;">
+          ${startPoint.lat.toFixed(5)}, ${startPoint.lng.toFixed(5)}
+        </div>
+      </div>
+    `);
+    startMarker.on("click", () => onMarkerClick?.(startPoint));
+
+    const endMarker = L.marker([endPoint.lat, endPoint.lng], { 
+      icon: createPinIcon("#34A853", "B"),  // Google green for destination
+      zIndexOffset: 1000,
+    }).addTo(markerGroup);
+    endMarker.bindPopup(`
+      <div style="padding: 8px 12px; min-width: 150px;">
+        <div style="font-weight: 600; font-size: 14px; margin-bottom: 4px;">${endPoint.name}</div>
+        <div style="font-size: 12px; color: #666;">Destination</div>
+        <div style="font-size: 10px; color: #999; margin-top: 4px;">
+          ${endPoint.lat.toFixed(5)}, ${endPoint.lng.toFixed(5)}
+        </div>
+      </div>
+    `);
+    endMarker.on("click", () => onMarkerClick?.(endPoint));
+
     // Get OSRM configuration for current mode
     const osrmConfig = getOsrmConfig(transportMode);
+    
+    // Flight mode - no routing, just show straight line distance
+    if (!osrmConfig) {
+      console.log(`[MapView] Flight mode - no routing available`);
+      
+      // Calculate straight-line distance
+      const distanceKm = calculateStraightLineDistance(
+        startPoint.lat, startPoint.lng,
+        endPoint.lat, endPoint.lng
+      ).toFixed(1);
+      
+      // Draw a dashed line for flight path visualization
+      const flightPath = L.polyline(
+        [[startPoint.lat, startPoint.lng], [endPoint.lat, endPoint.lng]],
+        {
+          color: "#6366f1",
+          weight: 2,
+          dashArray: "10, 10",
+          opacity: 0.6,
+        }
+      ).addTo(markerGroup);
+      
+      onRouteCalculated?.(`${distanceKm} km`, "N/A");
+      
+      // Fit bounds
+      const bounds = L.latLngBounds([[startPoint.lat, startPoint.lng], [endPoint.lat, endPoint.lng]]);
+      map.fitBounds(bounds, { padding: [60, 60] });
+      
+      prevPointsRef.current = pointsKey;
+      return;
+    }
+
     console.log(`[MapView] Using OSRM profile: ${osrmConfig.profile} for mode: ${transportMode}`);
 
     // Determine route line color based on mode
-    const modeColors: Record<TransportMode, string> = {
+    const modeColors: Record<string, string> = {
       driving: palette.primary,
       walking: "#16a34a", // Green for walking
-      cycling: "#8b5cf6", // Purple for cycling
-      transit: "#f59e0b", // Orange for transit
+      transit: "#f59e0b", // Orange for transit/bus
+      train: "#8b5cf6", // Purple for train
     };
 
     // Create NEW routing control with current mode
@@ -266,7 +360,7 @@ const MapView = ({
       }),
       lineOptions: {
         styles: [
-          { color: modeColors[transportMode], opacity: 0.8, weight: 5 },
+          { color: modeColors[transportMode] || palette.primary, opacity: 0.8, weight: 5 },
           { color: "white", opacity: 0.3, weight: 8 },
         ],
         extendToWaypoints: true,
@@ -277,7 +371,7 @@ const MapView = ({
       routeWhileDragging: false,
       fitSelectedRoutes: true,
       showAlternatives: false,
-      createMarker: () => null, // We'll add our own markers
+      createMarker: () => null, // We add our own markers
     });
 
     // Listen for route calculation to get distance and duration
@@ -289,16 +383,12 @@ const MapView = ({
         let durationMins = Math.round(route.summary.totalTime / 60);
         
         // Adjust duration based on mode (OSRM returns driving time)
-        // Apply realistic multipliers for different modes
         if (transportMode === "walking") {
-          // Walking is roughly 4x slower than driving
           durationMins = Math.round(durationMins * 4);
-        } else if (transportMode === "cycling") {
-          // Cycling is roughly 2x slower than driving
-          durationMins = Math.round(durationMins * 2);
         } else if (transportMode === "transit") {
-          // Transit includes waiting time, roughly 1.5x driving
           durationMins = Math.round(durationMins * 1.5);
+        } else if (transportMode === "train") {
+          durationMins = Math.round(durationMins * 0.8); // Trains are faster
         }
         
         let durationStr: string;
@@ -327,37 +417,8 @@ const MapView = ({
     routingControl.addTo(map);
     routingControlRef.current = routingControl;
 
-    // Add emoji markers for start and end at EXACT coordinates
-    const startMarker = L.marker([startPoint.lat, startPoint.lng], { 
-      icon: createEmojiIcon("🚩", 36) 
-    }).addTo(markerGroup);
-    startMarker.bindPopup(`
-      <div style="padding: 8px 12px; min-width: 150px;">
-        <div style="font-weight: 600; font-size: 14px; margin-bottom: 4px;">🚩 ${startPoint.name}</div>
-        <div style="font-size: 12px; color: #666;">Starting Point</div>
-        <div style="font-size: 10px; color: #999; margin-top: 4px;">
-          ${startPoint.lat.toFixed(5)}, ${startPoint.lng.toFixed(5)}
-        </div>
-      </div>
-    `);
-    startMarker.on("click", () => onMarkerClick?.(startPoint));
-
-    const endMarker = L.marker([endPoint.lat, endPoint.lng], { 
-      icon: createEmojiIcon("🏁", 36) 
-    }).addTo(markerGroup);
-    endMarker.bindPopup(`
-      <div style="padding: 8px 12px; min-width: 150px;">
-        <div style="font-weight: 600; font-size: 14px; margin-bottom: 4px;">🏁 ${endPoint.name}</div>
-        <div style="font-size: 12px; color: #666;">Destination</div>
-        <div style="font-size: 10px; color: #999; margin-top: 4px;">
-          ${endPoint.lat.toFixed(5)}, ${endPoint.lng.toFixed(5)}
-        </div>
-      </div>
-    `);
-    endMarker.on("click", () => onMarkerClick?.(endPoint));
-
     // Add area-based risk markers (not along route, but nearby areas)
-    // Skip start and end points as they have emoji markers
+    // Skip start and end points as they have pin markers
     const riskPoints = routePoints.slice(1, -1);
     riskPoints.forEach((point) => {
       const icon = point.status === "safe" ? icons.safe : point.status === "caution" ? icons.caution : icons.danger;
@@ -367,7 +428,7 @@ const MapView = ({
           <div style="font-weight: 600; font-size: 14px; margin-bottom: 4px;">${point.name}</div>
           <div style="display:flex; align-items:center; gap:8px; font-size: 12px; text-transform: capitalize;">
             <span style="width:10px; height:10px; border-radius:999px; background:${markerColor(point.status)};"></span>
-            <span>${point.status === "safe" ? "🟢 Safe Zone" : point.status === "caution" ? "🟡 Caution Zone" : "🔴 High Risk Zone"}</span>
+            <span>${point.status === "safe" ? "Safe Zone" : point.status === "caution" ? "Caution Zone" : "High Risk Zone"}</span>
           </div>
         </div>
       `;
@@ -383,20 +444,21 @@ const MapView = ({
     
     prevPointsRef.current = pointsKey;
 
-  }, [icons, onMarkerClick, palette, routePoints, markerColor, transportMode, createEmojiIcon, onRouteCalculated, routeKey]);
+  }, [icons, onMarkerClick, palette, routePoints, markerColor, transportMode, createPinIcon, onRouteCalculated, routeKey]);
 
   // Handle heatmap layer - combines area-based and route-corridor points
+  // IMPORTANT: Heatmap is independent of route - toggling does NOT affect route/markers
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
 
-    // Remove existing heatmap layer
+    // Remove existing heatmap layer only
     if (heatLayerRef.current) {
       map.removeLayer(heatLayerRef.current);
       heatLayerRef.current = null;
     }
 
-    // Add new heatmap layer if enabled
+    // Add new heatmap layer if enabled (route and markers remain untouched)
     if (showHeatmap) {
       // Start with area-based heatmap data
       let heatPoints: Array<[number, number, number]> = heatmapData.map((point) => [
@@ -405,26 +467,27 @@ const MapView = ({
         point.intensity,
       ]);
 
-      // Add route corridor points if we have a route
-      if (routeCoordsRef.current.length > 0) {
+      // Add route corridor points if we have a route (for flight mode, skip corridor)
+      if (routeCoordsRef.current.length > 0 && transportMode !== "flight") {
         const corridorPoints = generateRouteCorridorPoints(routeCoordsRef.current, 0.45);
         heatPoints = [...heatPoints, ...corridorPoints];
         console.log(`[MapView] Heatmap: ${heatmapData.length} area points + ${corridorPoints.length} corridor points`);
       }
 
       if (heatPoints.length > 0) {
+        // Create heatmap with smooth gradients and lower opacity for better route visibility
         const heatLayer = L.heatLayer(heatPoints, {
-          radius: 35,
-          blur: 25,
+          radius: 40,        // Wider radius for smoother appearance
+          blur: 30,          // More blur for gradient effect
           maxZoom: 12,
           max: 1.0,
-          minOpacity: 0.35,
+          minOpacity: 0.25,  // Lower opacity so route shows through
           gradient: {
-            0.0: "#16a34a", // Safe - Green
-            0.25: "#22c55e",
-            0.45: "#eab308", // Caution - Yellow
-            0.65: "#f59e0b",
-            0.8: "#ef4444", // Danger - Red
+            0.0: "#16a34a",  // Safe - Green
+            0.2: "#22c55e",
+            0.4: "#eab308",  // Caution - Yellow
+            0.6: "#f59e0b",
+            0.75: "#ef4444", // Danger - Red
             1.0: "#dc2626",
           },
         });
@@ -433,7 +496,7 @@ const MapView = ({
         heatLayerRef.current = heatLayer;
       }
     }
-  }, [showHeatmap, heatmapData, routeKey]);
+  }, [showHeatmap, heatmapData, routeKey, transportMode]);
 
   return (
     <div className="relative w-full h-full rounded-xl overflow-hidden shadow-elevated border-2 border-border/50 bg-card">

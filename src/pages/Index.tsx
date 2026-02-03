@@ -159,12 +159,13 @@ const Index = () => {
                 disabled={isLoading}
               />
               
-              {hasSearched && travelDuration && (
+              {hasSearched && (travelDuration || transportMode === "flight") && (
                 <TravelInfoCard
                   distance={travelDistance}
                   duration={travelDuration}
                   mode={transportMode}
                   isLoading={isLoading}
+                  isFlightMode={transportMode === "flight"}
                 />
               )}
               
@@ -302,12 +303,12 @@ const Index = () => {
                     </div>
                     <ul className="text-xs text-muted-foreground space-y-2">
                       <li className="flex items-start gap-2">
-                        <span className="text-base">🚩</span>
-                        <span>Red flag marks your starting point</span>
+                        <span className="w-3 h-3 mt-0.5 rounded-full bg-[#4285F4] flex-shrink-0" />
+                        <span>Blue pin marks your starting point (A)</span>
                       </li>
                       <li className="flex items-start gap-2">
-                        <span className="text-base">🏁</span>
-                        <span>Checkered flag marks destination</span>
+                        <span className="w-3 h-3 mt-0.5 rounded-full bg-[#34A853] flex-shrink-0" />
+                        <span>Green pin marks destination (B)</span>
                       </li>
                       <li className="flex items-start gap-2">
                         <span className="w-3 h-3 mt-0.5 rounded-full bg-safe flex-shrink-0" />

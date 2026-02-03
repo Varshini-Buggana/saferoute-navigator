@@ -1,7 +1,7 @@
-import { Car, PersonStanding, Bus, Bike } from "lucide-react";
+import { Car, PersonStanding, Bus, Train, Plane } from "lucide-react";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 
-export type TransportMode = "driving" | "walking" | "transit" | "cycling";
+export type TransportMode = "driving" | "walking" | "transit" | "train" | "flight";
 
 interface TransportModeSelectorProps {
   value: TransportMode;
@@ -10,10 +10,11 @@ interface TransportModeSelectorProps {
 }
 
 const modes = [
-  { value: "driving" as TransportMode, icon: Car, label: "Drive" },
   { value: "walking" as TransportMode, icon: PersonStanding, label: "Walk" },
-  { value: "transit" as TransportMode, icon: Bus, label: "Transit" },
-  { value: "cycling" as TransportMode, icon: Bike, label: "Cycle" },
+  { value: "driving" as TransportMode, icon: Car, label: "Car" },
+  { value: "transit" as TransportMode, icon: Bus, label: "Bus" },
+  { value: "train" as TransportMode, icon: Train, label: "Train" },
+  { value: "flight" as TransportMode, icon: Plane, label: "Flight" },
 ];
 
 const TransportModeSelector = ({ value, onChange, disabled }: TransportModeSelectorProps) => {
