@@ -49,7 +49,19 @@ const Index = () => {
     }
   };
 
+  // Handle transport mode change - this triggers route recalculation in MapView
+  const handleTransportModeChange = (mode: TransportMode) => {
+    console.log(`[Index] Transport mode changed to: ${mode}`);
+    setTransportMode(mode);
+    // Clear current travel info - will be updated when route recalculates
+    if (hasSearched && routePoints.length >= 2) {
+      setTravelDistance("Calculating...");
+      setTravelDuration("...");
+    }
+  };
+
   const handleRouteCalculated = (distance: string, duration: string) => {
+    console.log(`[Index] Route calculated: ${distance}, ${duration}`);
     setTravelDistance(distance);
     setTravelDuration(duration);
   };
@@ -143,7 +155,7 @@ const Index = () => {
               
               <TransportModeSelector 
                 value={transportMode}
-                onChange={setTransportMode}
+                onChange={handleTransportModeChange}
                 disabled={isLoading}
               />
               

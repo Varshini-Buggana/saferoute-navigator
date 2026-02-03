@@ -1,4 +1,4 @@
-import { Clock, Route as RouteIcon, Car, PersonStanding, Bus, Bike } from "lucide-react";
+import { Clock, Route as RouteIcon, Car, PersonStanding, Bus, Bike, Loader2 } from "lucide-react";
 import { TransportMode } from "./TransportModeSelector";
 
 interface TravelInfoCardProps {
@@ -22,8 +22,16 @@ const modeLabels = {
   cycling: "Cycling",
 };
 
+const modeDescriptions: Record<TransportMode, string> = {
+  driving: "By car via roads",
+  walking: "On foot",
+  transit: "Bus/Metro (estimated)",
+  cycling: "By bicycle",
+};
+
 const TravelInfoCard = ({ distance, duration, mode, isLoading }: TravelInfoCardProps) => {
   const ModeIcon = modeIcons[mode];
+  const isCalculating = duration === "..." || duration.includes("Calculating");
 
   if (isLoading) {
     return (
@@ -56,17 +64,27 @@ const TravelInfoCard = ({ distance, duration, mode, isLoading }: TravelInfoCardP
                 Active
               </span>
             </div>
-            <div className="flex items-center gap-3 mt-1 text-sm text-muted-foreground">
-              <span className="flex items-center gap-1">
-                <Clock className="w-3.5 h-3.5" />
-                {duration}
-              </span>
-              <span className="text-border">•</span>
-              <span className="flex items-center gap-1">
-                <RouteIcon className="w-3.5 h-3.5" />
-                {distance}
-              </span>
-            </div>
+            {isCalculating ? (
+              <div className="flex items-center gap-2 mt-1 text-sm text-muted-foreground">
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <span>Calculating route...</span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-3 mt-1 text-sm text-muted-foreground">
+                <span className="flex items-center gap-1">
+                  <Clock className="w-3.5 h-3.5" />
+                  {duration}
+                </span>
+                <span className="text-border">•</span>
+                <span className="flex items-center gap-1">
+                  <RouteIcon className="w-3.5 h-3.5" />
+                  {distance}
+                </span>
+              </div>
+            )}
+            <p className="text-xs text-muted-foreground/70 mt-1">
+              {modeDescriptions[mode]}
+            </p>
           </div>
         </div>
       </div>
