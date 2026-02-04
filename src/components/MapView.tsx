@@ -6,6 +6,7 @@ import "leaflet.heat";
 import { RoutePoint } from "@/data/mockSafetyData";
 import { HeatmapPoint } from "@/lib/safetyApi";
 import { TransportMode } from "./TransportModeSelector";
+import { RouteAlternative } from "./RouteAlternativesPanel";
 
 // Extend Leaflet types for routing machine and heatmap
 declare module "leaflet" {
@@ -23,6 +24,8 @@ interface MapViewProps {
   showHeatmap?: boolean;
   transportMode?: TransportMode;
   onRouteCalculated?: (distance: string, duration: string) => void;
+  onRoutesFound?: (routes: RouteAlternative[]) => void;
+  selectedRouteId?: number;
 }
 
 // OSRM profile mapping - different service URLs for different profiles
@@ -54,6 +57,73 @@ const calculateStraightLineDistance = (lat1: number, lng1: number, lat2: number,
     Math.sin(dLng / 2) * Math.sin(dLng / 2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return R * c;
+};
+
+// Generate route safety score based on route analysis
+const calculateRouteSafetyScore = (routeCoords: [number, number][], baseRiskAreas: RoutePoint[]): { score: number; riskLevel: "safe" | "caution" | "danger" } => {
+  if (!routeCoords.length || !baseRiskAreas.length) {
+    // No data - default to moderate safety
+    return { score: 75, riskLevel: "safe" };
+  }
+
+  let totalRiskScore = 0;
+  let riskPointsNearRoute = 0;
+  const proximityThreshold = 0.05; // ~5km in degrees
+
+  // Check how many risk points are near this route
+  for (const coord of routeCoords) {
+    for (const riskPoint of baseRiskAreas) {
+      const distance = Math.sqrt(
+        Math.pow(coord[0] - riskPoint.lat, 2) + 
+        Math.pow(coord[1] - riskPoint.lng, 2)
+      );
+      
+      if (distance < proximityThreshold) {
+        riskPointsNearRoute++;
+        if (riskPoint.status === "danger") {
+          totalRiskScore += 3;
+        } else if (riskPoint.status === "caution") {
+          totalRiskScore += 1.5;
+        } else {
+          totalRiskScore += 0.5;
+        }
+      }
+    }
+  }
+
+  // Normalize score (100 = safest, 0 = most dangerous)
+  const normalizedRisk = Math.min(totalRiskScore / (routeCoords.length * 0.1), 100);
+  const safetyScore = Math.max(0, Math.round(100 - normalizedRisk));
+
+  let riskLevel: "safe" | "caution" | "danger";
+  if (safetyScore >= 70) {
+    riskLevel = "safe";
+  } else if (safetyScore >= 40) {
+    riskLevel = "caution";
+  } else {
+    riskLevel = "danger";
+  }
+
+  return { score: safetyScore, riskLevel };
+};
+
+// Generate route name based on general direction
+const generateRouteName = (index: number, coords: [number, number][]): string => {
+  const names = ["via Main Route", "via Highway", "via Local Roads", "via Scenic Route", "via Express"];
+  if (index === 0) return "Fastest Route";
+  if (coords.length < 3) return names[index % names.length];
+  
+  // Try to determine direction
+  const midPoint = coords[Math.floor(coords.length / 2)];
+  const start = coords[0];
+  const deltaLat = midPoint[0] - start[0];
+  const deltaLng = midPoint[1] - start[1];
+  
+  if (Math.abs(deltaLat) > Math.abs(deltaLng)) {
+    return deltaLat > 0 ? "via Northern Route" : "via Southern Route";
+  } else {
+    return deltaLng > 0 ? "via Eastern Route" : "via Western Route";
+  }
 };
 
 // Generate points along a route corridor for heatmap
@@ -95,7 +165,9 @@ const MapView = ({
   heatmapData = [], 
   showHeatmap = false,
   transportMode = "driving",
-  onRouteCalculated
+  onRouteCalculated,
+  onRoutesFound,
+  selectedRouteId = 0
 }: MapViewProps) => {
   const worldCenter: [number, number] = [20, 0];
   const defaultZoom = 2;
@@ -106,6 +178,8 @@ const MapView = ({
   const routingControlRef = useRef<any>(null);
   const heatLayerRef = useRef<any>(null);
   const routeCoordsRef = useRef<[number, number][]>([]);
+  const alternativeRouteLinesRef = useRef<L.Polyline[]>([]);
+  const allRoutesRef = useRef<any[]>([]);
   
   // Track previous values to detect actual changes
   const prevModeRef = useRef<TransportMode>(transportMode);
@@ -205,6 +279,58 @@ const MapView = ({
     }
   }, [transportMode, routePoints.length]);
 
+  // Handle route selection change - highlight selected route
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || allRoutesRef.current.length === 0) return;
+
+    // Update polyline styles based on selection
+    alternativeRouteLinesRef.current.forEach((line, index) => {
+      if (line) {
+        const isSelected = index === selectedRouteId;
+        line.setStyle({
+          opacity: isSelected ? 0.9 : 0.4,
+          weight: isSelected ? 6 : 4,
+        });
+        if (isSelected) {
+          line.bringToFront();
+        }
+      }
+    });
+
+    // Update main route display info
+    const selectedRoute = allRoutesRef.current[selectedRouteId];
+    if (selectedRoute && onRouteCalculated) {
+      const distanceKm = (selectedRoute.summary.totalDistance / 1000).toFixed(1);
+      let durationMins = Math.round(selectedRoute.summary.totalTime / 60);
+      
+      // Adjust duration based on mode
+      if (transportMode === "walking") {
+        durationMins = Math.round(durationMins * 4);
+      } else if (transportMode === "transit") {
+        durationMins = Math.round(durationMins * 1.5);
+      } else if (transportMode === "train") {
+        durationMins = Math.round(durationMins * 0.8);
+      }
+      
+      let durationStr: string;
+      if (durationMins < 60) {
+        durationStr = `${durationMins} min`;
+      } else {
+        const hours = Math.floor(durationMins / 60);
+        const mins = durationMins % 60;
+        durationStr = mins > 0 ? `${hours}h ${mins}min` : `${hours}h`;
+      }
+      
+      onRouteCalculated(`${distanceKm} km`, durationStr);
+      
+      // Update route coords for heatmap
+      if (selectedRoute.coordinates) {
+        routeCoordsRef.current = selectedRoute.coordinates.map((c: any) => [c.lat, c.lng] as [number, number]);
+      }
+    }
+  }, [selectedRouteId, transportMode, onRouteCalculated]);
+
   // Initialize map
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
@@ -263,6 +389,13 @@ const MapView = ({
         console.log("Routing control cleanup");
       }
     }
+
+    // Clear alternative route lines
+    alternativeRouteLinesRef.current.forEach(line => {
+      if (line) map.removeLayer(line);
+    });
+    alternativeRouteLinesRef.current = [];
+    allRoutesRef.current = [];
 
     if (routePoints.length < 2) {
       prevPointsRef.current = pointsKey;
@@ -330,6 +463,9 @@ const MapView = ({
       
       onRouteCalculated?.(`${distanceKm} km`, "N/A");
       
+      // Clear routes found for flight mode
+      onRoutesFound?.([]);
+      
       // Fit bounds
       const bounds = L.latLngBounds([[startPoint.lat, startPoint.lng], [endPoint.lat, endPoint.lng]]);
       map.fitBounds(bounds, { padding: [60, 60] });
@@ -340,15 +476,18 @@ const MapView = ({
 
     console.log(`[MapView] Using OSRM profile: ${osrmConfig.profile} for mode: ${transportMode}`);
 
-    // Determine route line color based on mode
+    // Mode colors for routes
     const modeColors: Record<string, string> = {
       driving: palette.primary,
-      walking: "#16a34a", // Green for walking
-      transit: "#f59e0b", // Orange for transit/bus
-      train: "#8b5cf6", // Purple for train
+      walking: "#16a34a",
+      transit: "#f59e0b",
+      train: "#8b5cf6",
     };
+    
+    const mainColor = modeColors[transportMode] || palette.primary;
+    const alternativeColors = ["#6b7280", "#9ca3af", "#d1d5db"];
 
-    // Create NEW routing control with current mode
+    // Create routing control with alternatives enabled
     const routingControl = L.Routing.control({
       waypoints: [
         L.latLng(startPoint.lat, startPoint.lng),
@@ -360,8 +499,8 @@ const MapView = ({
       }),
       lineOptions: {
         styles: [
-          { color: modeColors[transportMode] || palette.primary, opacity: 0.8, weight: 5 },
-          { color: "white", opacity: 0.3, weight: 8 },
+          { color: mainColor, opacity: 0.9, weight: 6 },
+          { color: "white", opacity: 0.3, weight: 9 },
         ],
         extendToWaypoints: true,
         missingRouteTolerance: 0,
@@ -370,7 +509,12 @@ const MapView = ({
       addWaypoints: false,
       routeWhileDragging: false,
       fitSelectedRoutes: true,
-      showAlternatives: false,
+      showAlternatives: true, // Enable alternatives
+      altLineOptions: {
+        styles: [
+          { color: alternativeColors[0], opacity: 0.5, weight: 4 },
+        ],
+      },
       createMarker: () => null, // We add our own markers
     });
 
@@ -378,17 +522,69 @@ const MapView = ({
     routingControl.on("routesfound", (e: any) => {
       const routes = e.routes;
       if (routes && routes.length > 0) {
-        const route = routes[0];
-        const distanceKm = (route.summary.totalDistance / 1000).toFixed(1);
-        let durationMins = Math.round(route.summary.totalTime / 60);
+        console.log(`[MapView] Found ${routes.length} route(s)`);
         
-        // Adjust duration based on mode (OSRM returns driving time)
+        // Store all routes
+        allRoutesRef.current = routes;
+
+        // Process routes for alternatives panel
+        const routeAlternatives: RouteAlternative[] = routes.map((route: any, index: number) => {
+          const distanceKm = (route.summary.totalDistance / 1000).toFixed(1);
+          let durationMins = Math.round(route.summary.totalTime / 60);
+          
+          // Adjust duration based on mode
+          if (transportMode === "walking") {
+            durationMins = Math.round(durationMins * 4);
+          } else if (transportMode === "transit") {
+            durationMins = Math.round(durationMins * 1.5);
+          } else if (transportMode === "train") {
+            durationMins = Math.round(durationMins * 0.8);
+          }
+          
+          let durationStr: string;
+          if (durationMins < 60) {
+            durationStr = `${durationMins} min`;
+          } else {
+            const hours = Math.floor(durationMins / 60);
+            const mins = durationMins % 60;
+            durationStr = mins > 0 ? `${hours}h ${mins}min` : `${hours}h`;
+          }
+
+          // Get route coordinates
+          const coords: [number, number][] = route.coordinates 
+            ? route.coordinates.map((c: any) => [c.lat, c.lng] as [number, number])
+            : [];
+
+          // Calculate safety score for this route
+          const riskPoints = routePoints.slice(1, -1); // Exclude start/end
+          const { score, riskLevel } = calculateRouteSafetyScore(coords, riskPoints);
+
+          return {
+            id: index,
+            name: generateRouteName(index, coords),
+            distance: `${distanceKm} km`,
+            duration: durationStr,
+            safetyScore: score,
+            riskLevel,
+            isSelected: index === selectedRouteId,
+            coordinates: coords,
+          };
+        });
+
+        // Notify parent of available routes
+        onRoutesFound?.(routeAlternatives);
+
+        // Update primary route info
+        const primaryRoute = routes[selectedRouteId] || routes[0];
+        const distanceKm = (primaryRoute.summary.totalDistance / 1000).toFixed(1);
+        let durationMins = Math.round(primaryRoute.summary.totalTime / 60);
+        
         if (transportMode === "walking") {
           durationMins = Math.round(durationMins * 4);
         } else if (transportMode === "transit") {
           durationMins = Math.round(durationMins * 1.5);
         } else if (transportMode === "train") {
-          durationMins = Math.round(durationMins * 0.8); // Trains are faster
+          durationMins = Math.round(durationMins * 0.8);
         }
         
         let durationStr: string;
@@ -400,13 +596,39 @@ const MapView = ({
           durationStr = mins > 0 ? `${hours}h ${mins}min` : `${hours}h`;
         }
         
-        console.log(`[MapView] Route calculated - Distance: ${distanceKm}km, Duration: ${durationStr} (${transportMode})`);
+        console.log(`[MapView] Primary route - Distance: ${distanceKm}km, Duration: ${durationStr}`);
         onRouteCalculated?.(`${distanceKm} km`, durationStr);
         
         // Store route coordinates for heatmap corridor
-        if (route.coordinates) {
-          routeCoordsRef.current = route.coordinates.map((c: any) => [c.lat, c.lng] as [number, number]);
+        if (primaryRoute.coordinates) {
+          routeCoordsRef.current = primaryRoute.coordinates.map((c: any) => [c.lat, c.lng] as [number, number]);
         }
+
+        // Draw alternative routes manually with clickable interaction
+        routes.forEach((route: any, index: number) => {
+          if (route.coordinates) {
+            const coords = route.coordinates.map((c: any) => [c.lat, c.lng] as [number, number]);
+            const isSelected = index === selectedRouteId;
+            
+            const polyline = L.polyline(coords, {
+              color: isSelected ? mainColor : alternativeColors[Math.min(index, alternativeColors.length - 1)],
+              weight: isSelected ? 6 : 4,
+              opacity: isSelected ? 0.9 : 0.4,
+            }).addTo(map);
+
+            // Add click handler for route selection
+            polyline.on("click", () => {
+              // This will trigger the parent to update selectedRouteId
+              const newRoutes = routeAlternatives.map((r, i) => ({
+                ...r,
+                isSelected: i === index,
+              }));
+              onRoutesFound?.(newRoutes);
+            });
+
+            alternativeRouteLinesRef.current.push(polyline);
+          }
+        });
       }
     });
 
@@ -444,7 +666,7 @@ const MapView = ({
     
     prevPointsRef.current = pointsKey;
 
-  }, [icons, onMarkerClick, palette, routePoints, markerColor, transportMode, createPinIcon, onRouteCalculated, routeKey]);
+  }, [icons, onMarkerClick, palette, routePoints, markerColor, transportMode, createPinIcon, onRouteCalculated, onRoutesFound, routeKey, selectedRouteId]);
 
   // Handle heatmap layer - combines area-based and route-corridor points
   // IMPORTANT: Heatmap is independent of route - toggling does NOT affect route/markers
