@@ -67,7 +67,6 @@ const calculateRouteSafetyScore = (routeCoords: [number, number][], baseRiskArea
   }
 
   let totalRiskScore = 0;
-  let riskPointsNearRoute = 0;
   const proximityThreshold = 0.05; // ~5km in degrees
 
   // Check how many risk points are near this route
@@ -79,7 +78,6 @@ const calculateRouteSafetyScore = (routeCoords: [number, number][], baseRiskArea
       );
       
       if (distance < proximityThreshold) {
-        riskPointsNearRoute++;
         if (riskPoint.status === "danger") {
           totalRiskScore += 3;
         } else if (riskPoint.status === "caution") {
@@ -159,6 +157,41 @@ const generateRouteCorridorPoints = (
   return points;
 };
 
+// Calculate duration string with mode adjustments
+const calculateDurationString = (totalTimeSeconds: number, mode: TransportMode): string => {
+  let durationMins = Math.round(totalTimeSeconds / 60);
+  
+  // Adjust duration based on mode
+  if (mode === "walking") {
+    durationMins = Math.round(durationMins * 4);
+  } else if (mode === "transit") {
+    durationMins = Math.round(durationMins * 1.5);
+  } else if (mode === "train") {
+    durationMins = Math.round(durationMins * 0.8);
+  }
+  
+  if (durationMins < 60) {
+    return `${durationMins} min`;
+  } else {
+    const hours = Math.floor(durationMins / 60);
+    const mins = durationMins % 60;
+    return mins > 0 ? `${hours}h ${mins}min` : `${hours}h`;
+  }
+};
+
+// Cached route data structure
+interface CachedRoute {
+  id: number;
+  name: string;
+  distance: string;
+  duration: string;
+  safetyScore: number;
+  riskLevel: "safe" | "caution" | "danger";
+  coordinates: [number, number][];
+  rawTotalDistance: number;
+  rawTotalTime: number;
+}
+
 const MapView = ({ 
   routePoints, 
   onMarkerClick, 
@@ -178,15 +211,18 @@ const MapView = ({
   const routingControlRef = useRef<any>(null);
   const heatLayerRef = useRef<any>(null);
   const routeCoordsRef = useRef<[number, number][]>([]);
-  const alternativeRouteLinesRef = useRef<L.Polyline[]>([]);
-  const allRoutesRef = useRef<any[]>([]);
   
-  // Track previous values to detect actual changes
-  const prevModeRef = useRef<TransportMode>(transportMode);
-  const prevPointsRef = useRef<string>("");
+  // Persistent route polylines - NEVER cleared during selection
+  const routePolylinesRef = useRef<Map<number, L.Polyline>>(new Map());
   
-  // Unique key for forcing route recalculation
-  const [routeKey, setRouteKey] = useState(0);
+  // Cached routes - only updated when source/destination/mode changes
+  const cachedRoutesRef = useRef<CachedRoute[]>([]);
+  
+  // Track what triggered the last fetch to avoid redundant calls
+  const lastFetchKeyRef = useRef<string>("");
+  
+  // State to track active route for styling
+  const [activeRouteIndex, setActiveRouteIndex] = useState(0);
 
   const palette = useMemo(() => {
     if (typeof window === "undefined") return null;
@@ -270,66 +306,58 @@ const MapView = ({
     return palette.danger;
   }, [palette]);
 
-  // Detect transport mode changes and trigger re-route
-  useEffect(() => {
-    if (prevModeRef.current !== transportMode && routePoints.length >= 2) {
-      console.log(`[MapView] Transport mode changed: ${prevModeRef.current} → ${transportMode}`);
-      prevModeRef.current = transportMode;
-      setRouteKey(k => k + 1); // Force route recalculation
-    }
-  }, [transportMode, routePoints.length]);
+  // Mode colors for routes
+  const getModeColor = useCallback((mode: TransportMode, paletteObj: { primary: string; safe: string; caution: string; danger: string }) => {
+    const modeColors: Record<string, string> = {
+      driving: paletteObj.primary,
+      walking: "#16a34a",
+      transit: "#f59e0b",
+      train: "#8b5cf6",
+    };
+    return modeColors[mode] || paletteObj.primary;
+  }, []);
 
-  // Handle route selection change - highlight selected route
-  useEffect(() => {
+  // Update polyline styles based on selection - NO API CALLS
+  const updateRouteStyles = useCallback((newActiveIndex: number) => {
     const map = mapRef.current;
-    if (!map || allRoutesRef.current.length === 0) return;
+    if (!map || !palette) return;
 
-    // Update polyline styles based on selection
-    alternativeRouteLinesRef.current.forEach((line, index) => {
-      if (line) {
-        const isSelected = index === selectedRouteId;
-        line.setStyle({
-          opacity: isSelected ? 0.9 : 0.4,
-          weight: isSelected ? 6 : 4,
-        });
-        if (isSelected) {
-          line.bringToFront();
-        }
+    const mainColor = getModeColor(transportMode, palette);
+    const inactiveColor = "#9ca3af";
+
+    routePolylinesRef.current.forEach((polyline, index) => {
+      const isActive = index === newActiveIndex;
+      polyline.setStyle({
+        color: isActive ? mainColor : inactiveColor,
+        weight: isActive ? 6 : 4,
+        opacity: isActive ? 0.9 : 0.4,
+      });
+      
+      if (isActive) {
+        polyline.bringToFront();
       }
     });
 
-    // Update main route display info
-    const selectedRoute = allRoutesRef.current[selectedRouteId];
+    // Update route info for newly selected route
+    const selectedRoute = cachedRoutesRef.current[newActiveIndex];
     if (selectedRoute && onRouteCalculated) {
-      const distanceKm = (selectedRoute.summary.totalDistance / 1000).toFixed(1);
-      let durationMins = Math.round(selectedRoute.summary.totalTime / 60);
-      
-      // Adjust duration based on mode
-      if (transportMode === "walking") {
-        durationMins = Math.round(durationMins * 4);
-      } else if (transportMode === "transit") {
-        durationMins = Math.round(durationMins * 1.5);
-      } else if (transportMode === "train") {
-        durationMins = Math.round(durationMins * 0.8);
-      }
-      
-      let durationStr: string;
-      if (durationMins < 60) {
-        durationStr = `${durationMins} min`;
-      } else {
-        const hours = Math.floor(durationMins / 60);
-        const mins = durationMins % 60;
-        durationStr = mins > 0 ? `${hours}h ${mins}min` : `${hours}h`;
-      }
-      
-      onRouteCalculated(`${distanceKm} km`, durationStr);
+      const durationStr = calculateDurationString(selectedRoute.rawTotalTime, transportMode);
+      onRouteCalculated(selectedRoute.distance, durationStr);
       
       // Update route coords for heatmap
-      if (selectedRoute.coordinates) {
-        routeCoordsRef.current = selectedRoute.coordinates.map((c: any) => [c.lat, c.lng] as [number, number]);
-      }
+      routeCoordsRef.current = selectedRoute.coordinates;
     }
-  }, [selectedRouteId, transportMode, onRouteCalculated]);
+
+    setActiveRouteIndex(newActiveIndex);
+  }, [transportMode, palette, onRouteCalculated, getModeColor]);
+
+  // Sync external selectedRouteId with internal state - STYLE ONLY
+  useEffect(() => {
+    if (selectedRouteId !== activeRouteIndex && cachedRoutesRef.current.length > 0) {
+      console.log(`[MapView] Route selection changed: ${activeRouteIndex} → ${selectedRouteId} (style update only)`);
+      updateRouteStyles(selectedRouteId);
+    }
+  }, [selectedRouteId, activeRouteIndex, updateRouteStyles]);
 
   // Initialize map
   useEffect(() => {
@@ -358,6 +386,8 @@ const MapView = ({
           console.log("Routing control cleanup");
         }
       }
+      routePolylinesRef.current.forEach(p => map.removeLayer(p));
+      routePolylinesRef.current.clear();
       map.remove();
       mapRef.current = null;
       markerGroupRef.current = null;
@@ -366,21 +396,29 @@ const MapView = ({
     };
   }, []);
 
-  // Handle routing when points, transport mode, or routeKey changes
+  // Handle routing - ONLY when source, destination, or mode changes
   useEffect(() => {
     const map = mapRef.current;
     const markerGroup = markerGroupRef.current;
     if (!map || !markerGroup || !icons || !palette) return;
 
-    // Create a key from route points to detect actual changes
-    const pointsKey = routePoints.map(p => `${p.lat},${p.lng}`).join("|");
-    
-    console.log(`[MapView] Route effect triggered - Mode: ${transportMode}, Points: ${routePoints.length}, Key: ${routeKey}`);
+    // Create a unique key for this route request
+    const pointsKey = routePoints.map(p => `${p.lat.toFixed(6)},${p.lng.toFixed(6)}`).join("|");
+    const fetchKey = `${pointsKey}|${transportMode}`;
+
+    // Skip if this is the same request (prevents re-fetch loops)
+    if (fetchKey === lastFetchKeyRef.current) {
+      console.log(`[MapView] Skipping duplicate fetch for: ${transportMode}`);
+      return;
+    }
+
+    console.log(`[MapView] New route request - Mode: ${transportMode}, Points: ${routePoints.length}`);
+    lastFetchKeyRef.current = fetchKey;
 
     // Clear previous markers
     markerGroup.clearLayers();
 
-    // Remove previous routing control completely
+    // Remove previous routing control
     if (routingControlRef.current) {
       try {
         map.removeControl(routingControlRef.current);
@@ -390,15 +428,12 @@ const MapView = ({
       }
     }
 
-    // Clear alternative route lines
-    alternativeRouteLinesRef.current.forEach(line => {
-      if (line) map.removeLayer(line);
-    });
-    alternativeRouteLinesRef.current = [];
-    allRoutesRef.current = [];
+    // Clear previous route polylines
+    routePolylinesRef.current.forEach(p => map.removeLayer(p));
+    routePolylinesRef.current.clear();
+    cachedRoutesRef.current = [];
 
     if (routePoints.length < 2) {
-      prevPointsRef.current = pointsKey;
       return;
     }
 
@@ -451,7 +486,7 @@ const MapView = ({
       ).toFixed(1);
       
       // Draw a dashed line for flight path visualization
-      const flightPath = L.polyline(
+      L.polyline(
         [[startPoint.lat, startPoint.lng], [endPoint.lat, endPoint.lng]],
         {
           color: "#6366f1",
@@ -462,30 +497,19 @@ const MapView = ({
       ).addTo(markerGroup);
       
       onRouteCalculated?.(`${distanceKm} km`, "N/A");
-      
-      // Clear routes found for flight mode
       onRoutesFound?.([]);
       
       // Fit bounds
       const bounds = L.latLngBounds([[startPoint.lat, startPoint.lng], [endPoint.lat, endPoint.lng]]);
       map.fitBounds(bounds, { padding: [60, 60] });
       
-      prevPointsRef.current = pointsKey;
       return;
     }
 
     console.log(`[MapView] Using OSRM profile: ${osrmConfig.profile} for mode: ${transportMode}`);
 
-    // Mode colors for routes
-    const modeColors: Record<string, string> = {
-      driving: palette.primary,
-      walking: "#16a34a",
-      transit: "#f59e0b",
-      train: "#8b5cf6",
-    };
-    
-    const mainColor = modeColors[transportMode] || palette.primary;
-    const alternativeColors = ["#6b7280", "#9ca3af", "#d1d5db"];
+    const mainColor = getModeColor(transportMode, palette);
+    const inactiveColor = "#9ca3af";
 
     // Create routing control with alternatives enabled
     const routingControl = L.Routing.control({
@@ -498,137 +522,115 @@ const MapView = ({
         profile: osrmConfig.profile,
       }),
       lineOptions: {
-        styles: [
-          { color: mainColor, opacity: 0.9, weight: 6 },
-          { color: "white", opacity: 0.3, weight: 9 },
-        ],
-        extendToWaypoints: true,
+        styles: [{ color: "transparent", opacity: 0, weight: 0 }], // Hide default lines
+        extendToWaypoints: false,
         missingRouteTolerance: 0,
       },
       show: false,
       addWaypoints: false,
       routeWhileDragging: false,
-      fitSelectedRoutes: true,
-      showAlternatives: true, // Enable alternatives
+      fitSelectedRoutes: false,
+      showAlternatives: true,
       altLineOptions: {
-        styles: [
-          { color: alternativeColors[0], opacity: 0.5, weight: 4 },
-        ],
+        styles: [{ color: "transparent", opacity: 0, weight: 0 }], // Hide default alt lines
       },
-      createMarker: () => null, // We add our own markers
+      createMarker: () => null,
     });
 
-    // Listen for route calculation to get distance and duration
+    // Listen for route calculation - FETCH ONCE, CACHE RESULTS
     routingControl.on("routesfound", (e: any) => {
       const routes = e.routes;
-      if (routes && routes.length > 0) {
-        console.log(`[MapView] Found ${routes.length} route(s)`);
+      if (!routes || routes.length === 0) return;
+
+      console.log(`[MapView] Fetched ${routes.length} route(s) - caching for selection`);
+      
+      // Get risk points for safety calculation
+      const riskPoints = routePoints.slice(1, -1);
+
+      // Cache route data and create polylines
+      const cachedRoutes: CachedRoute[] = routes.map((route: any, index: number) => {
+        const coords: [number, number][] = route.coordinates 
+          ? route.coordinates.map((c: any) => [c.lat, c.lng] as [number, number])
+          : [];
         
-        // Store all routes
-        allRoutesRef.current = routes;
+        const distanceKm = (route.summary.totalDistance / 1000).toFixed(1);
+        const { score, riskLevel } = calculateRouteSafetyScore(coords, riskPoints);
 
-        // Process routes for alternatives panel
-        const routeAlternatives: RouteAlternative[] = routes.map((route: any, index: number) => {
-          const distanceKm = (route.summary.totalDistance / 1000).toFixed(1);
-          let durationMins = Math.round(route.summary.totalTime / 60);
+        // Create polyline for this route - PERSISTENT
+        const isActive = index === 0; // First route is active by default
+        const polyline = L.polyline(coords, {
+          color: isActive ? mainColor : inactiveColor,
+          weight: isActive ? 6 : 4,
+          opacity: isActive ? 0.9 : 0.4,
+        }).addTo(map);
+
+        // Add click handler for route selection (style change only)
+        polyline.on("click", () => {
+          console.log(`[MapView] Route ${index} clicked - updating styles only`);
           
-          // Adjust duration based on mode
-          if (transportMode === "walking") {
-            durationMins = Math.round(durationMins * 4);
-          } else if (transportMode === "transit") {
-            durationMins = Math.round(durationMins * 1.5);
-          } else if (transportMode === "train") {
-            durationMins = Math.round(durationMins * 0.8);
-          }
+          // Update styles locally
+          updateRouteStyles(index);
           
-          let durationStr: string;
-          if (durationMins < 60) {
-            durationStr = `${durationMins} min`;
-          } else {
-            const hours = Math.floor(durationMins / 60);
-            const mins = durationMins % 60;
-            durationStr = mins > 0 ? `${hours}h ${mins}min` : `${hours}h`;
-          }
-
-          // Get route coordinates
-          const coords: [number, number][] = route.coordinates 
-            ? route.coordinates.map((c: any) => [c.lat, c.lng] as [number, number])
-            : [];
-
-          // Calculate safety score for this route
-          const riskPoints = routePoints.slice(1, -1); // Exclude start/end
-          const { score, riskLevel } = calculateRouteSafetyScore(coords, riskPoints);
-
-          return {
-            id: index,
-            name: generateRouteName(index, coords),
-            distance: `${distanceKm} km`,
-            duration: durationStr,
-            safetyScore: score,
-            riskLevel,
-            isSelected: index === selectedRouteId,
-            coordinates: coords,
-          };
+          // Notify parent with updated selection
+          const updatedAlternatives: RouteAlternative[] = cachedRoutesRef.current.map((r, i) => ({
+            id: r.id,
+            name: r.name,
+            distance: r.distance,
+            duration: calculateDurationString(r.rawTotalTime, transportMode),
+            safetyScore: r.safetyScore,
+            riskLevel: r.riskLevel,
+            isSelected: i === index,
+            coordinates: r.coordinates,
+          }));
+          onRoutesFound?.(updatedAlternatives);
         });
 
-        // Notify parent of available routes
-        onRoutesFound?.(routeAlternatives);
+        // Store polyline reference
+        routePolylinesRef.current.set(index, polyline);
 
-        // Update primary route info
-        const primaryRoute = routes[selectedRouteId] || routes[0];
-        const distanceKm = (primaryRoute.summary.totalDistance / 1000).toFixed(1);
-        let durationMins = Math.round(primaryRoute.summary.totalTime / 60);
-        
-        if (transportMode === "walking") {
-          durationMins = Math.round(durationMins * 4);
-        } else if (transportMode === "transit") {
-          durationMins = Math.round(durationMins * 1.5);
-        } else if (transportMode === "train") {
-          durationMins = Math.round(durationMins * 0.8);
-        }
-        
-        let durationStr: string;
-        if (durationMins < 60) {
-          durationStr = `${durationMins} min`;
-        } else {
-          const hours = Math.floor(durationMins / 60);
-          const mins = durationMins % 60;
-          durationStr = mins > 0 ? `${hours}h ${mins}min` : `${hours}h`;
-        }
-        
-        console.log(`[MapView] Primary route - Distance: ${distanceKm}km, Duration: ${durationStr}`);
-        onRouteCalculated?.(`${distanceKm} km`, durationStr);
-        
-        // Store route coordinates for heatmap corridor
-        if (primaryRoute.coordinates) {
-          routeCoordsRef.current = primaryRoute.coordinates.map((c: any) => [c.lat, c.lng] as [number, number]);
-        }
+        return {
+          id: index,
+          name: generateRouteName(index, coords),
+          distance: `${distanceKm} km`,
+          duration: calculateDurationString(route.summary.totalTime, transportMode),
+          safetyScore: score,
+          riskLevel,
+          coordinates: coords,
+          rawTotalDistance: route.summary.totalDistance,
+          rawTotalTime: route.summary.totalTime,
+        };
+      });
 
-        // Draw alternative routes manually with clickable interaction
-        routes.forEach((route: any, index: number) => {
-          if (route.coordinates) {
-            const coords = route.coordinates.map((c: any) => [c.lat, c.lng] as [number, number]);
-            const isSelected = index === selectedRouteId;
-            
-            const polyline = L.polyline(coords, {
-              color: isSelected ? mainColor : alternativeColors[Math.min(index, alternativeColors.length - 1)],
-              weight: isSelected ? 6 : 4,
-              opacity: isSelected ? 0.9 : 0.4,
-            }).addTo(map);
+      // Store cached routes
+      cachedRoutesRef.current = cachedRoutes;
 
-            // Add click handler for route selection
-            polyline.on("click", () => {
-              // This will trigger the parent to update selectedRouteId
-              const newRoutes = routeAlternatives.map((r, i) => ({
-                ...r,
-                isSelected: i === index,
-              }));
-              onRoutesFound?.(newRoutes);
-            });
+      // Notify parent of available routes
+      const routeAlternatives: RouteAlternative[] = cachedRoutes.map((r, i) => ({
+        id: r.id,
+        name: r.name,
+        distance: r.distance,
+        duration: r.duration,
+        safetyScore: r.safetyScore,
+        riskLevel: r.riskLevel,
+        isSelected: i === 0,
+        coordinates: r.coordinates,
+      }));
+      onRoutesFound?.(routeAlternatives);
 
-            alternativeRouteLinesRef.current.push(polyline);
-          }
-        });
+      // Update primary route info
+      const primaryRoute = cachedRoutes[0];
+      if (primaryRoute) {
+        onRouteCalculated?.(primaryRoute.distance, primaryRoute.duration);
+        routeCoordsRef.current = primaryRoute.coordinates;
+      }
+
+      // Reset active route index
+      setActiveRouteIndex(0);
+
+      // Bring first route to front
+      const firstPolyline = routePolylinesRef.current.get(0);
+      if (firstPolyline) {
+        firstPolyline.bringToFront();
       }
     });
 
@@ -640,7 +642,6 @@ const MapView = ({
     routingControlRef.current = routingControl;
 
     // Add area-based risk markers (not along route, but nearby areas)
-    // Skip start and end points as they have pin markers
     const riskPoints = routePoints.slice(1, -1);
     riskPoints.forEach((point) => {
       const icon = point.status === "safe" ? icons.safe : point.status === "caution" ? icons.caution : icons.danger;
@@ -663,13 +664,10 @@ const MapView = ({
     // Fit bounds to show all points
     const bounds = L.latLngBounds(routePoints.map((p) => [p.lat, p.lng] as [number, number]));
     map.fitBounds(bounds, { padding: [60, 60] });
-    
-    prevPointsRef.current = pointsKey;
 
-  }, [icons, onMarkerClick, palette, routePoints, markerColor, transportMode, createPinIcon, onRouteCalculated, onRoutesFound, routeKey, selectedRouteId]);
+  }, [icons, onMarkerClick, palette, routePoints, markerColor, transportMode, createPinIcon, onRouteCalculated, onRoutesFound, getModeColor, updateRouteStyles]);
 
-  // Handle heatmap layer - combines area-based and route-corridor points
-  // IMPORTANT: Heatmap is independent of route - toggling does NOT affect route/markers
+  // Handle heatmap layer - INDEPENDENT of route selection
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -680,7 +678,7 @@ const MapView = ({
       heatLayerRef.current = null;
     }
 
-    // Add new heatmap layer if enabled (route and markers remain untouched)
+    // Add new heatmap layer if enabled
     if (showHeatmap) {
       // Start with area-based heatmap data
       let heatPoints: Array<[number, number, number]> = heatmapData.map((point) => [
@@ -689,7 +687,7 @@ const MapView = ({
         point.intensity,
       ]);
 
-      // Add route corridor points if we have a route (for flight mode, skip corridor)
+      // Add route corridor points if we have a route
       if (routeCoordsRef.current.length > 0 && transportMode !== "flight") {
         const corridorPoints = generateRouteCorridorPoints(routeCoordsRef.current, 0.45);
         heatPoints = [...heatPoints, ...corridorPoints];
@@ -697,19 +695,18 @@ const MapView = ({
       }
 
       if (heatPoints.length > 0) {
-        // Create heatmap with smooth gradients and lower opacity for better route visibility
         const heatLayer = L.heatLayer(heatPoints, {
-          radius: 40,        // Wider radius for smoother appearance
-          blur: 30,          // More blur for gradient effect
+          radius: 40,
+          blur: 30,
           maxZoom: 12,
           max: 1.0,
-          minOpacity: 0.25,  // Lower opacity so route shows through
+          minOpacity: 0.25,
           gradient: {
-            0.0: "#16a34a",  // Safe - Green
+            0.0: "#16a34a",
             0.2: "#22c55e",
-            0.4: "#eab308",  // Caution - Yellow
+            0.4: "#eab308",
             0.6: "#f59e0b",
-            0.75: "#ef4444", // Danger - Red
+            0.75: "#ef4444",
             1.0: "#dc2626",
           },
         });
@@ -718,7 +715,7 @@ const MapView = ({
         heatLayerRef.current = heatLayer;
       }
     }
-  }, [showHeatmap, heatmapData, routeKey, transportMode]);
+  }, [showHeatmap, heatmapData, transportMode]);
 
   return (
     <div className="relative w-full h-full rounded-xl overflow-hidden shadow-elevated border-2 border-border/50 bg-card">
