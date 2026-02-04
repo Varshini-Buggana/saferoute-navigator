@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Header from "@/components/Header";
 import SearchPanel from "@/components/SearchPanel";
 import MapView from "@/components/MapView";
@@ -8,6 +8,7 @@ import TransportModeSelector, { TransportMode } from "@/components/TransportMode
 import TravelInfoCard from "@/components/TravelInfoCard";
 import SafetyInfoPanel, { SafetyData } from "@/components/SafetyInfoPanel";
 import RouteInfoPanel from "@/components/RouteInfoPanel";
+import RouteAlternativesPanel, { RouteAlternative } from "@/components/RouteAlternativesPanel";
 import { RoutePoint } from "@/data/mockSafetyData";
 import { useRouteSafetyAnalysis, useHeatmapData } from "@/hooks/useSafetyAnalysis";
 import { RouteSafetyResponse, riskLevelToStatus, HeatmapPoint } from "@/lib/safetyApi";
@@ -31,6 +32,8 @@ const Index = () => {
   const [transportMode, setTransportMode] = useState<TransportMode>("driving");
   const [travelDistance, setTravelDistance] = useState<string>("");
   const [travelDuration, setTravelDuration] = useState<string>("");
+  const [routeAlternatives, setRouteAlternatives] = useState<RouteAlternative[]>([]);
+  const [selectedRouteId, setSelectedRouteId] = useState<number>(0);
 
   const routeSafetyMutation = useRouteSafetyAnalysis();
   const heatmapQuery = useHeatmapData();
@@ -60,11 +63,44 @@ const Index = () => {
     }
   };
 
-  const handleRouteCalculated = (distance: string, duration: string) => {
+  const handleRouteCalculated = useCallback((distance: string, duration: string) => {
     console.log(`[Index] Route calculated: ${distance}, ${duration}`);
     setTravelDistance(distance);
     setTravelDuration(duration);
-  };
+  }, []);
+
+  const handleRoutesFound = useCallback((routes: RouteAlternative[]) => {
+    console.log(`[Index] Found ${routes.length} route alternatives`);
+    setRouteAlternatives(routes);
+    
+    // Find the selected route and update info
+    const selected = routes.find(r => r.isSelected);
+    if (selected) {
+      setSelectedRouteId(selected.id);
+    }
+  }, []);
+
+  const handleRouteSelect = useCallback((routeId: number) => {
+    console.log(`[Index] Route selected: ${routeId}`);
+    setSelectedRouteId(routeId);
+    
+    // Update alternatives to reflect selection
+    setRouteAlternatives(prev => prev.map(r => ({
+      ...r,
+      isSelected: r.id === routeId,
+    })));
+    
+    // Update travel info for selected route
+    const selectedRoute = routeAlternatives.find(r => r.id === routeId);
+    if (selectedRoute) {
+      setTravelDistance(selectedRoute.distance);
+      setTravelDuration(selectedRoute.duration);
+      
+      toast.success(`Route ${routeId + 1} selected`, {
+        description: `Safety Score: ${selectedRoute.safetyScore}% (${selectedRoute.riskLevel})`,
+      });
+    }
+  }, [routeAlternatives]);
 
   const handleSearch = async (
     from: string, 
@@ -77,6 +113,8 @@ const Index = () => {
     setRouteAnalysis(null);
     setTravelDistance("");
     setTravelDuration("");
+    setRouteAlternatives([]);
+    setSelectedRouteId(0);
 
     try {
       const result = await routeSafetyMutation.mutateAsync({ 
@@ -247,12 +285,24 @@ const Index = () => {
                   showHeatmap={showHeatmap}
                   transportMode={transportMode}
                   onRouteCalculated={handleRouteCalculated}
+                  onRoutesFound={handleRoutesFound}
+                  selectedRouteId={selectedRouteId}
                 />
               )}
             </div>
 
             {/* Right Sidebar - Safety Info */}
             <div className="lg:col-span-3 space-y-4">
+              {/* Route Alternatives Panel */}
+              {hasSearched && routeAlternatives.length > 0 && (
+                <RouteAlternativesPanel
+                  routes={routeAlternatives}
+                  onRouteSelect={handleRouteSelect}
+                  isLoading={isLoading}
+                  transportMode={transportMode}
+                />
+              )}
+              
               {routeAnalysis && (
                 <RouteInfoPanel data={routeAnalysis} />
               )}
