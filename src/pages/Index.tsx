@@ -9,6 +9,13 @@ import TravelInfoCard from "@/components/TravelInfoCard";
 import SafetyInfoPanel, { SafetyData } from "@/components/SafetyInfoPanel";
 import RouteInfoPanel from "@/components/RouteInfoPanel";
 import RouteAlternativesPanel, { RouteAlternative } from "@/components/RouteAlternativesPanel";
+ import SafetyAlertBanner from "@/components/SafetyAlertBanner";
+ import ZoneSafetyIndicator from "@/components/ZoneSafetyIndicator";
+ import TimeBasedSafetyMode, { SafetyTimeMode } from "@/components/TimeBasedSafetyMode";
+ import SOSButton from "@/components/SOSButton";
+ import EmergencySOSPanel from "@/components/EmergencySOSPanel";
+ import SafeRouteToggle from "@/components/SafeRouteToggle";
+ import ExplainableSafetyPanel from "@/components/ExplainableSafetyPanel";
 import { RoutePoint } from "@/data/mockSafetyData";
 import { useRouteSafetyAnalysis, useHeatmapData } from "@/hooks/useSafetyAnalysis";
 import { RouteSafetyResponse, riskLevelToStatus, HeatmapPoint } from "@/lib/safetyApi";
@@ -34,6 +41,13 @@ const Index = () => {
   const [travelDuration, setTravelDuration] = useState<string>("");
   const [routeAlternatives, setRouteAlternatives] = useState<RouteAlternative[]>([]);
   const [selectedRouteId, setSelectedRouteId] = useState<number>(0);
+   
+   // Safety feature states
+   const [safetyTimeMode, setSafetyTimeMode] = useState<SafetyTimeMode>("day");
+   const [showSOSPanel, setShowSOSPanel] = useState(false);
+   const [preferSaferRoute, setPreferSaferRoute] = useState(false);
+   const [showExplainablePanel, setShowExplainablePanel] = useState(false);
+   const [currentZoneStatus, setCurrentZoneStatus] = useState<"safe" | "caution" | "danger" | null>(null);
 
   const routeSafetyMutation = useRouteSafetyAnalysis();
   const heatmapQuery = useHeatmapData();
@@ -101,6 +115,65 @@ const Index = () => {
       });
     }
   }, [routeAlternatives]);
+
+   // Get current zone status from selected route
+   useEffect(() => {
+     if (routeAlternatives.length > 0) {
+       const selectedRoute = routeAlternatives.find(r => r.id === selectedRouteId);
+       if (selectedRoute) {
+         // Apply night mode sensitivity
+         let adjustedStatus = selectedRoute.riskLevel;
+         if (safetyTimeMode === "night") {
+           // In night mode, upgrade caution to danger sensitivity
+           if (selectedRoute.safetyScore < 80) {
+             adjustedStatus = selectedRoute.safetyScore < 60 ? "danger" : "caution";
+           }
+         }
+         setCurrentZoneStatus(adjustedStatus);
+       }
+     } else {
+       setCurrentZoneStatus(null);
+     }
+   }, [routeAlternatives, selectedRouteId, safetyTimeMode]);
+   
+   // Handle prefer safer route toggle
+   const handlePreferSaferRoute = useCallback((enabled: boolean) => {
+     setPreferSaferRoute(enabled);
+     
+     if (enabled && routeAlternatives.length > 1) {
+       // Find the safest route
+       const safestRoute = routeAlternatives.reduce((a, b) => 
+         a.safetyScore > b.safetyScore ? a : b
+       );
+       
+       if (safestRoute.id !== selectedRouteId) {
+         handleRouteSelect(safestRoute.id);
+         toast.success("Safer route selected", {
+           description: `Safety Score: ${safestRoute.safetyScore}% (${safestRoute.riskLevel})`,
+         });
+       }
+     }
+   }, [routeAlternatives, selectedRouteId]);
+   
+   // Calculate safer route difference for display
+   const getSaferRouteDiff = useCallback(() => {
+     if (routeAlternatives.length < 2) return null;
+     
+     const currentRoute = routeAlternatives.find(r => r.id === selectedRouteId);
+     const fastestRoute = routeAlternatives[0];
+     
+     if (!currentRoute || currentRoute.id === fastestRoute.id) return null;
+     
+     return {
+       timeDiff: "5-10 min",
+       safetyImprovement: currentRoute.safetyScore - fastestRoute.safetyScore,
+     };
+   }, [routeAlternatives, selectedRouteId]);
+   
+   // Get selected route for explainable panel
+   const getSelectedRoute = useCallback(() => {
+     return routeAlternatives.find(r => r.id === selectedRouteId) || null;
+   }, [routeAlternatives, selectedRouteId]);
 
   const handleSearch = async (
     from: string, 
@@ -178,6 +251,12 @@ const Index = () => {
 
   return (
     <div className="min-h-screen bg-travel flex flex-col relative">
+       {/* Safety Alert Banner */}
+       <SafetyAlertBanner
+         currentZoneStatus={currentZoneStatus}
+         isVisible={hasSearched && !isLoading}
+       />
+       
       {/* Animated background gradient */}
       <div className="absolute inset-0 bg-hero pointer-events-none" />
       <div className="absolute inset-0 nav-pattern pointer-events-none opacity-30" />
@@ -207,6 +286,19 @@ const Index = () => {
                 />
               )}
               
+               <SafeRouteToggle
+                 enabled={preferSaferRoute}
+                 onToggle={handlePreferSaferRoute}
+                 disabled={isLoading || routeAlternatives.length < 2}
+                 safestRouteDiff={preferSaferRoute ? getSaferRouteDiff() : null}
+               />
+               
+               <TimeBasedSafetyMode
+                 mode={safetyTimeMode}
+                 onModeChange={setSafetyTimeMode}
+                 disabled={isLoading}
+               />
+               
               <HeatmapToggle 
                 enabled={showHeatmap} 
                 onToggle={handleHeatmapToggle}
@@ -295,12 +387,21 @@ const Index = () => {
             <div className="lg:col-span-3 space-y-4">
               {/* Route Alternatives Panel */}
               {hasSearched && routeAlternatives.length > 0 && (
-                <RouteAlternativesPanel
-                  routes={routeAlternatives}
-                  onRouteSelect={handleRouteSelect}
-                  isLoading={isLoading}
-                  transportMode={transportMode}
-                />
+                 <>
+                   <RouteAlternativesPanel
+                     routes={routeAlternatives}
+                     onRouteSelect={handleRouteSelect}
+                     isLoading={isLoading}
+                     transportMode={transportMode}
+                   />
+                   <ExplainableSafetyPanel
+                     selectedRoute={getSelectedRoute()}
+                     isOpen={showExplainablePanel}
+                     onOpen={() => setShowExplainablePanel(true)}
+                     onClose={() => setShowExplainablePanel(false)}
+                     allRoutes={routeAlternatives}
+                   />
+                 </>
               )}
               
               {routeAnalysis && (
@@ -376,6 +477,25 @@ const Index = () => {
           </div>
         </div>
       </main>
+       
+       {/* Zone Safety Indicator */}
+       <ZoneSafetyIndicator
+         status={currentZoneStatus || "safe"}
+         isVisible={hasSearched && !isLoading && currentZoneStatus !== null}
+       />
+       
+       {/* SOS Button */}
+       <SOSButton
+         onClick={() => setShowSOSPanel(true)}
+         isVisible={hasSearched}
+       />
+       
+       {/* Emergency SOS Panel */}
+       <EmergencySOSPanel
+         isOpen={showSOSPanel}
+         onClose={() => setShowSOSPanel(false)}
+         currentLocation={routePoints.length > 0 ? { lat: routePoints[0].lat, lng: routePoints[0].lng } : null}
+       />
 
       {/* Footer */}
       <footer className="bg-card/80 backdrop-blur-sm border-t border-border py-4 px-6 relative z-10">
