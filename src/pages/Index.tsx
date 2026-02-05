@@ -16,6 +16,10 @@ import RouteAlternativesPanel, { RouteAlternative } from "@/components/RouteAlte
  import EmergencySOSPanel from "@/components/EmergencySOSPanel";
  import SafeRouteToggle from "@/components/SafeRouteToggle";
  import ExplainableSafetyPanel from "@/components/ExplainableSafetyPanel";
+ import ShareRouteButton from "@/components/ShareRouteButton";
+ import LocationSharingPanel from "@/components/LocationSharingPanel";
+ import VoiceAlertToggle from "@/components/VoiceAlertToggle";
+ import { useVoiceAlerts } from "@/hooks/useVoiceAlerts";
 import { RoutePoint } from "@/data/mockSafetyData";
 import { useRouteSafetyAnalysis, useHeatmapData } from "@/hooks/useSafetyAnalysis";
 import { RouteSafetyResponse, riskLevelToStatus, HeatmapPoint } from "@/lib/safetyApi";
@@ -48,6 +52,17 @@ const Index = () => {
    const [preferSaferRoute, setPreferSaferRoute] = useState(false);
    const [showExplainablePanel, setShowExplainablePanel] = useState(false);
    const [currentZoneStatus, setCurrentZoneStatus] = useState<"safe" | "caution" | "danger" | null>(null);
+   
+   // Sharing & voice states
+   const [showSharingPanel, setShowSharingPanel] = useState(false);
+   const [isLocationSharing, setIsLocationSharing] = useState(false);
+   const [voiceAlertsEnabled, setVoiceAlertsEnabled] = useState(true);
+ 
+   // Voice alerts hook
+   useVoiceAlerts({
+     enabled: voiceAlertsEnabled,
+     zoneStatus: currentZoneStatus,
+   });
 
   const routeSafetyMutation = useRouteSafetyAnalysis();
   const heatmapQuery = useHeatmapData();
@@ -304,6 +319,12 @@ const Index = () => {
                 onToggle={handleHeatmapToggle}
                 isLoading={heatmapQuery.isLoading}
               />
+               
+               <VoiceAlertToggle
+                 enabled={voiceAlertsEnabled}
+                 onToggle={setVoiceAlertsEnabled}
+                 disabled={isLoading}
+               />
               
               <MapLegend />
               
@@ -407,6 +428,17 @@ const Index = () => {
               {routeAnalysis && (
                 <RouteInfoPanel data={routeAnalysis} />
               )}
+               
+               {/* Share Route Button */}
+               {hasSearched && routeAlternatives.length > 0 && (
+                 <div className="bg-card rounded-xl p-4 shadow-soft border border-border">
+                   <ShareRouteButton
+                     onClick={() => setShowSharingPanel(true)}
+                     isSharing={isLocationSharing}
+                     disabled={isLoading}
+                   />
+                 </div>
+               )}
               
               {selectedSafetyData ? (
                 <SafetyInfoPanel data={selectedSafetyData} isVisible={true} />
@@ -495,6 +527,16 @@ const Index = () => {
          isOpen={showSOSPanel}
          onClose={() => setShowSOSPanel(false)}
          currentLocation={routePoints.length > 0 ? { lat: routePoints[0].lat, lng: routePoints[0].lng } : null}
+       />
+       
+       {/* Location Sharing Panel */}
+       <LocationSharingPanel
+         isOpen={showSharingPanel}
+         onClose={() => setShowSharingPanel(false)}
+         isSharing={isLocationSharing}
+         onToggleSharing={setIsLocationSharing}
+         routeName={selectedSafetyData?.location || "Current Route"}
+         safetyStatus={currentZoneStatus || "safe"}
        />
 
       {/* Footer */}
